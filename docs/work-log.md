@@ -30,3 +30,13 @@ First backend vertical slice:
 - Added `.env.example` and updated docs to describe the temporary Hermes API server boundary and setup.
 - Manual testing confirmed the setup needs `hermes-chat/.env.local`, `API_SERVER_ENABLED=true` in the `hermes-agent` environment, a matching `API_SERVER_KEY` when auth is enabled, and a Hermes gateway restart or reload after `hermes-agent` env changes before the chat app can send messages.
 - Kept auth, persistence, attachments, streaming, and the final gateway-native session model out of scope.
+
+SQLite persistence slice:
+
+- Added `better-sqlite3` and a small repository layer in `lib/chat-store.ts`.
+- Configured a local SQLite database path via `SQLITE_DB_PATH`, defaulting to `./data/hermes-chat.sqlite`.
+- Initialized the SQLite schema automatically, enabled WAL mode, and kept the persistence model intentionally small for a single-server app with a few concurrent users.
+- Added chat list/create and chat detail API routes so the sidebar and transcript load from persisted data.
+- Updated `app/api/chat/route.ts` so a user message is persisted first, Hermes is called with recent persisted context, and the assistant reply is persisted second.
+- Rewired the UI to load real chats into the sidebar, create a default chat when the database is empty, switch between chats, and keep history across refreshes.
+- Left auth, Postgres, streaming, attachments, and the final gateway-native Hermes session model out of scope for later phases.

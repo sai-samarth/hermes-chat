@@ -10,9 +10,9 @@ This repository is a disciplined Phase 1 baseline for a future Hermes gateway we
 
 - Keep the app foundation intentionally small.
 - Ship a single App Router route with a restrained chat workspace.
-- Add the smallest vertical slice that can send a message to Hermes and render the reply.
+- Add the smallest vertical slice that can persist chats locally, send a message to Hermes, and render the reply.
 - Keep the conversation pane visually primary and the surrounding chrome quiet.
-- Avoid auth, database work, uploads, attachments, streaming, and extra routes for now.
+- Keep auth, uploads, attachments, streaming, and broad application routing out of scope for now.
 
 ## Current Foundation
 
@@ -20,9 +20,10 @@ This repository is a disciplined Phase 1 baseline for a future Hermes gateway we
 - React
 - TypeScript
 - ESLint with Next.js config
-- Local in-browser chat state
-- Next.js API route at `app/api/chat/route.ts`
+- SQLite-backed local chat persistence via `better-sqlite3`
+- Next.js API routes for chat send, chat list/create, and chat detail loading
 - Temporary Hermes API server adapter in `lib/hermes.ts`
+- Anonymous/local-user workspace semantics only
 
 ## Setup
 
@@ -35,11 +36,13 @@ This repository is a disciplined Phase 1 baseline for a future Hermes gateway we
    `HERMES_API_BASE_URL` should include the OpenAI-compatible `/v1` prefix and defaults to `http://localhost:8642/v1`
    `HERMES_MODEL` should match the model exposed by the Hermes API server and defaults to `hermes-agent`
    `HERMES_API_KEY` is optional if your local Hermes API server does not require auth
-5. Start the Hermes API server
-6. If you changed the `hermes-agent` environment, restart or reload the Hermes gateway before testing the chat app, or message sends will keep failing against stale gateway state
-7. Run `npm run dev`
+5. Optionally set `SQLITE_DB_PATH` in `hermes-chat/.env.local` if you do not want the default `./data/hermes-chat.sqlite`
+   Relative paths resolve from the project root and parent directories are created automatically
+6. Start the Hermes API server
+7. If you changed the `hermes-agent` environment, restart or reload the Hermes gateway before testing the chat app, or message sends will keep failing against stale gateway state
+8. Run `npm run dev`
 
-This backend slice uses the Hermes OpenAI-compatible API server as a temporary boundary. It is not the final gateway-native session model.
+This slice stores chats and messages in a local SQLite file while still using the Hermes OpenAI-compatible API server as the temporary model boundary. It is not the final gateway-native session model, and it is not yet a Postgres-backed multi-user architecture.
 
 ## Local Commands
 
@@ -51,18 +54,20 @@ This backend slice uses the Hermes OpenAI-compatible API server as a temporary b
 
 - `app/layout.tsx`, `app/page.tsx`, and `app/globals.css`
 - `app/api/chat/route.ts`
-- `lib/chat-types.ts` and `lib/hermes.ts`
+- `app/api/chats/route.ts` and `app/api/chats/[chatId]/route.ts`
+- `lib/chat-types.ts`, `lib/chat-store.ts`, and `lib/hermes.ts`
 - Minimal Next.js configuration and TypeScript setup
-- A single-route chat workspace with local transcript state, loading state, and a working composer
+- A single-route chat workspace with a persisted sidebar, chat selection, loading state, and a working composer
 - A server-side Hermes client that calls the Hermes API server through environment variables
+- SQLite-backed chats and messages that survive page refresh and auto-create a default chat when the database is empty
 - Clear labels indicating that this is a temporary API-server-backed slice, not the final gateway-native model
 
 ## Not Included Yet
 
 - Authentication
-- Database or persistence
+- Postgres or any external/shared database
 - File uploads
 - Attachments
 - Streaming responses
 - Final gateway-native Hermes session adapter
-- Additional application routes
+- Broader multi-route application structure

@@ -173,8 +173,26 @@ code {
   display: flex;
   justify-content: space-between;
   gap: 0.75rem;
-  align-items: baseline;
+  align-items: center;
   padding: 0 0.25rem;
+}
+
+.sidebar-action {
+  height: 2rem;
+  padding: 0 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sidebar-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .thread-list {
@@ -187,10 +205,21 @@ code {
 }
 
 .thread-item {
+  width: 100%;
   padding: 0.95rem 0.95rem 0.9rem;
   border: 1px solid transparent;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  color: inherit;
+  appearance: none;
+  -webkit-appearance: none;
   border-radius: 12px;
   background: transparent;
+}
+
+.thread-item:disabled {
+  cursor: default;
 }
 
 .thread-item-active {
@@ -321,6 +350,19 @@ code {
   padding-bottom: 0.1rem;
 }
 
+.timeline-status {
+  align-self: center;
+  max-width: 28rem;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+  text-align: center;
+}
+
+.timeline-status-error {
+  color: #9f2a2a;
+}
+
 .message {
   width: min(45rem, 100%);
   padding: 1.1rem 1.15rem;
@@ -359,6 +401,10 @@ code {
 .message-pending {
   border-style: dashed;
   background: #fbfcfd;
+}
+
+.message-empty {
+  align-self: flex-start;
 }
 
 .composer-shell {

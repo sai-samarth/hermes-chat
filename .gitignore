@@ -5,3 +5,4 @@ out
 npm-debug.log*
 .env*
 !.env.example
+data/*.sqlite*
