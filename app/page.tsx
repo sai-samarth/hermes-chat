@@ -229,7 +229,7 @@ export default function Home() {
   const threadFacts: ThreadDetailFact[] = [
     {
       label: "Boundary",
-      value: "Hermes API server"
+      value: "Local Hermes bridge"
     },
     {
       label: "Persistence",
@@ -667,8 +667,8 @@ export default function Home() {
             <h1 className="auth-title">Private local chat history, scoped per account.</h1>
             <p className="auth-copy">
               Sign in with email and password to unlock your own SQLite-backed
-              workspace. Hermes still stays behind the same Next.js server-side
-              API boundary, but chats now belong to a real local user session.
+              workspace. Hermes now runs through a local bridge that keeps
+              profiles isolated per account and sessions stable per chat.
             </p>
 
             <dl className="auth-facts" aria-label="Current backend slice">
@@ -863,8 +863,8 @@ export default function Home() {
             <p className="sidebar-note-title">Backend slice</p>
             <p className="sidebar-note">
               Chats are now scoped to a local user account with secure cookie
-              sessions. Postgres and gateway-native Hermes sessions can come
-              later.
+              sessions, while Hermes runs through a local bridge with isolated
+              profiles and per-chat sessions. Postgres can come later.
             </p>
           </div>
         </aside>
@@ -888,8 +888,9 @@ export default function Home() {
 
               <p className="chat-summary">
                 Chats now persist in a local SQLite file under your account,
-                refresh keeps your personal history intact, and Hermes still
-                sits behind the same server-side API boundary.
+                refresh keeps your personal history intact, and Hermes now runs
+                behind a local bridge with per-user profiles and per-chat
+                sessions.
               </p>
             </div>
 
@@ -965,8 +966,8 @@ export default function Home() {
                   <span>Drafting</span>
                 </div>
                 <p className="message-copy">
-                  User message persisted. Request in flight through the Hermes
-                  API server.
+                  User message persisted. Request in flight through the local
+                  Hermes bridge.
                 </p>
               </article>
             ) : null}
@@ -989,9 +990,9 @@ export default function Home() {
                   disabled={composerBusy}
                 />
                 <p className="composer-copy">
-                  Personal workspace with SQLite-backed chat history and local
-                  email/password auth. Postgres and gateway-native Hermes
-                  sessions stay out of scope for this phase.
+                  Personal workspace with SQLite-backed chat history, local
+                  email/password auth, isolated Hermes profiles, and stable
+                  per-chat Hermes sessions.
                 </p>
               </div>
 

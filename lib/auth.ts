@@ -30,6 +30,7 @@ const scrypt = promisify(scryptCallback);
 type UserRow = {
   created_at: string;
   email: string;
+  hermes_profile_name?: string | null;
   id: string;
   password_hash: string;
 };
@@ -281,6 +282,43 @@ export async function registerLocalUser(email: string, password: string) {
     id: userId,
     email
   };
+}
+
+export function getUserHermesProfileName(userId: string) {
+  const db = getDb();
+  const row = db
+    .prepare(
+      `
+        select hermes_profile_name
+        from users
+        where id = ?
+        limit 1
+      `
+    )
+    .get(userId) as { hermes_profile_name: string | null } | undefined;
+
+  if (!row) {
+    throw new AuthError("User not found.", 404);
+  }
+
+  return row.hermes_profile_name;
+}
+
+export function setUserHermesProfileName(userId: string, hermesProfileName: string) {
+  const db = getDb();
+  const result = db
+    .prepare(
+      `
+        update users
+        set hermes_profile_name = ?
+        where id = ?
+      `
+    )
+    .run(hermesProfileName, userId);
+
+  if (result.changes === 0) {
+    throw new AuthError("User not found.", 404);
+  }
 }
 
 export async function authenticateLocalUser(email: string, password: string) {

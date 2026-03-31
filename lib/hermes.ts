@@ -2,22 +2,41 @@ import "server-only";
 
 import type { ChatMessage } from "@/lib/chat-types";
 
-type HermesChatCompletionResponse = {
-  choices?: Array<{
-    message?: {
-      content?: string | null;
-    };
-  }>;
+type HermesBridgeChatRequest = {
+  app_user_email: string;
+  app_user_id: string;
+  chat_id: string;
+  hermes_session_id?: string;
+  history?: ChatMessage[];
+  message: string;
 };
 
-type HermesConfig = {
+type HermesBridgeChatResponse = {
+  hermes_profile_name?: string;
+  hermes_session_id?: string;
+  message?: string;
+};
+
+type HermesBridgeConfig = {
   apiKey?: string;
   baseUrl: string;
-  model: string;
 };
 
-// This isolates the temporary OpenAI-compatible Hermes boundary so callers can
-// later swap to a gateway-native adapter without reshaping the route contract.
+export type HermesChatTurnInput = {
+  appUserEmail: string;
+  appUserId: string;
+  chatId: string;
+  hermesSessionId?: string | null;
+  history?: ChatMessage[];
+  message: string;
+};
+
+export type HermesChatTurnResult = {
+  assistantMessage: ChatMessage;
+  hermesProfileName: string;
+  hermesSessionId: string;
+};
+
 export class HermesClientError extends Error {
   status: number;
 
@@ -28,29 +47,20 @@ export class HermesClientError extends Error {
   }
 }
 
-function getHermesConfig(): HermesConfig {
-  const baseUrl = process.env.HERMES_API_BASE_URL?.trim();
-  const model = process.env.HERMES_MODEL?.trim();
-  const apiKey = process.env.HERMES_API_KEY?.trim();
+function getHermesConfig(): HermesBridgeConfig {
+  const baseUrl = process.env.HERMES_BRIDGE_URL?.trim();
+  const apiKey = process.env.HERMES_BRIDGE_API_KEY?.trim();
 
   if (!baseUrl) {
     throw new HermesClientError(
-      "Hermes backend is not configured. Set HERMES_API_BASE_URL.",
-      500
-    );
-  }
-
-  if (!model) {
-    throw new HermesClientError(
-      "Hermes backend is not configured. Set HERMES_MODEL.",
+      "Hermes bridge is not configured. Set HERMES_BRIDGE_URL.",
       500
     );
   }
 
   return {
     apiKey,
-    baseUrl: baseUrl.replace(/\/+$/, ""),
-    model
+    baseUrl: baseUrl.replace(/\/+$/, "")
   };
 }
 
@@ -86,29 +96,40 @@ async function readErrorDetail(response: Response): Promise<string | undefined> 
   }
 }
 
-export async function createHermesAssistantMessage(
-  messages: ChatMessage[]
-): Promise<ChatMessage> {
-  const { apiKey, baseUrl, model } = getHermesConfig();
+export async function createHermesChatTurn(
+  input: HermesChatTurnInput
+): Promise<HermesChatTurnResult> {
+  const { apiKey, baseUrl } = getHermesConfig();
+  const requestBody: HermesBridgeChatRequest = {
+    app_user_id: input.appUserId,
+    app_user_email: input.appUserEmail,
+    chat_id: input.chatId,
+    message: input.message
+  };
+
+  if (input.hermesSessionId) {
+    requestBody.hermes_session_id = input.hermesSessionId;
+  }
+
+  if (input.history && input.history.length > 0) {
+    requestBody.history = input.history;
+  }
 
   let response: Response;
 
   try {
-    response = await fetch(`${baseUrl}/chat/completions`, {
+    response = await fetch(`${baseUrl}/v1/chat`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {})
+        ...(apiKey ? { "X-Hermes-Bridge-Key": apiKey } : {})
       },
-      body: JSON.stringify({
-        model,
-        messages
-      }),
+      body: JSON.stringify(requestBody),
       cache: "no-store"
     });
   } catch {
     throw new HermesClientError(
-      "Hermes API server is unreachable from the Next.js backend.",
+      "Hermes bridge is unreachable from the Next.js backend.",
       502
     );
   }
@@ -116,24 +137,44 @@ export async function createHermesAssistantMessage(
   if (!response.ok) {
     const detail = await readErrorDetail(response);
     const message = detail
-      ? `Hermes API server request failed: ${detail}`
-      : `Hermes API server request failed with status ${response.status}.`;
+      ? `Hermes bridge request failed: ${detail}`
+      : `Hermes bridge request failed with status ${response.status}.`;
 
     throw new HermesClientError(message, 502);
   }
 
-  const payload = (await response.json()) as HermesChatCompletionResponse;
-  const content = payload.choices?.[0]?.message?.content;
+  const payload = (await response.json()) as HermesBridgeChatResponse;
+  const content = payload.message?.trim();
+  const hermesSessionId = payload.hermes_session_id?.trim();
+  const hermesProfileName = payload.hermes_profile_name?.trim();
 
-  if (typeof content !== "string" || content.trim().length === 0) {
+  if (!content) {
     throw new HermesClientError(
-      "Hermes API server returned an empty assistant message.",
+      "Hermes bridge returned an empty assistant message.",
+      502
+    );
+  }
+
+  if (!hermesSessionId) {
+    throw new HermesClientError(
+      "Hermes bridge returned an empty Hermes session id.",
+      502
+    );
+  }
+
+  if (!hermesProfileName) {
+    throw new HermesClientError(
+      "Hermes bridge returned an empty Hermes profile name.",
       502
     );
   }
 
   return {
-    role: "assistant",
-    content: content.trim()
+    assistantMessage: {
+      role: "assistant",
+      content
+    },
+    hermesProfileName,
+    hermesSessionId
   };
 }

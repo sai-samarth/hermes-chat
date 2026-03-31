@@ -52,6 +52,7 @@ function initializeDatabase(db: DatabaseInstance) {
       id text primary key,
       email text not null unique,
       password_hash text not null,
+      hermes_profile_name text,
       created_at text not null
     );
 
@@ -67,7 +68,9 @@ function initializeDatabase(db: DatabaseInstance) {
       id text primary key,
       title text not null,
       created_at text not null,
-      updated_at text not null
+      updated_at text not null,
+      owner_user_id text references users(id) on delete cascade,
+      hermes_session_id text
     );
 
     create table if not exists messages (
@@ -83,6 +86,20 @@ function initializeDatabase(db: DatabaseInstance) {
     db.exec(`
       alter table chats
       add column owner_user_id text references users(id) on delete cascade
+    `);
+  }
+
+  if (!columnExists(db, "users", "hermes_profile_name")) {
+    db.exec(`
+      alter table users
+      add column hermes_profile_name text
+    `);
+  }
+
+  if (!columnExists(db, "chats", "hermes_session_id")) {
+    db.exec(`
+      alter table chats
+      add column hermes_session_id text
     `);
   }
 

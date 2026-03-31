@@ -51,3 +51,22 @@ Local auth and session slice:
 - Scoped chat list, chat detail, chat creation, and message append/Hermes send operations to the authenticated user only.
 - Reworked the single route so signed-out users see a clean auth screen while signed-in users see the existing chat workspace.
 - Updated setup docs and environment examples for the local-auth phase while keeping Hermes behind the same server-side API boundary.
+
+Hermes profile bridge migration:
+
+- Replaced the temporary Hermes OpenAI-compatible API server boundary with a
+  localhost-only Python bridge in `bridge/hermes_bridge.py`.
+- Added additive SQLite schema columns for `users.hermes_profile_name` and
+  `chats.hermes_session_id`.
+- Added store helpers so the Next.js backend can persist Hermes profile/session
+  mappings without changing the frontend API contract.
+- Updated `lib/hermes.ts` to call the bridge over HTTP instead of
+  `/v1/chat/completions`.
+- Updated `app/api/chat/route.ts` so the user message is persisted first, the
+  bridge is called second, returned Hermes profile/session IDs are stored third,
+  and the assistant reply is persisted last.
+- Added one-time bootstrap history handoff for older chats that have app-side
+  history but no stored Hermes session ID yet.
+- Documented bridge setup, bridge env vars, and the new Phase 1 boundary in
+  `.env.example`, `README.md`, `docs/current-status.md`, and
+  `bridge/README.md`.

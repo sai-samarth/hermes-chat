@@ -1,16 +1,19 @@
 import { NextResponse } from "next/server";
 
-import { AuthError, requireAuthenticatedUser } from "@/lib/auth";
+import {
+  AuthError,
+  requireAuthenticatedUser,
+  setUserHermesProfileName
+} from "@/lib/auth";
 import {
   appendMessage,
   ChatStoreError,
   getChat,
-  listMessagesForHermes
+  getChatHermesSessionId,
+  listMessagesForHermes,
+  setChatHermesSessionId
 } from "@/lib/chat-store";
-import {
-  createHermesAssistantMessage,
-  HermesClientError
-} from "@/lib/hermes";
+import { createHermesChatTurn, HermesClientError } from "@/lib/hermes";
 
 const MAX_CONTEXT_MESSAGES = 40;
 const MAX_MESSAGE_LENGTH = 8000;
@@ -73,10 +76,29 @@ export async function POST(request: Request) {
       content
     });
 
-    const assistantMessage = await createHermesAssistantMessage(
-      listMessagesForHermes(user.id, chatId, MAX_CONTEXT_MESSAGES)
-    );
-    const message = appendMessage(user.id, chatId, assistantMessage);
+    const hermesSessionId = getChatHermesSessionId(user.id, chatId);
+    const bootstrapHistory =
+      hermesSessionId === null
+        ? listMessagesForHermes(user.id, chatId, MAX_CONTEXT_MESSAGES, {
+            excludeMessageId: userMessage.id
+          })
+        : undefined;
+    const hermesTurn = await createHermesChatTurn({
+      appUserId: user.id,
+      appUserEmail: user.email,
+      chatId,
+      message: content,
+      hermesSessionId,
+      history:
+        bootstrapHistory && bootstrapHistory.length > 0
+          ? bootstrapHistory
+          : undefined
+    });
+
+    setUserHermesProfileName(user.id, hermesTurn.hermesProfileName);
+    setChatHermesSessionId(user.id, chatId, hermesTurn.hermesSessionId);
+
+    const message = appendMessage(user.id, chatId, hermesTurn.assistantMessage);
     const chat = getChat(user.id, chatId);
 
     if (!chat) {

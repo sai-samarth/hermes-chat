@@ -26,6 +26,11 @@ type MessageRow = {
   id: string;
   role: ChatMessageRole;
 };
+
+type ChatHermesSessionRow = {
+  hermes_session_id: string | null;
+};
+
 export const DEFAULT_CHAT_TITLE = "New chat";
 export const MAX_CHAT_TITLE_LENGTH = 80;
 const MAX_PREVIEW_LENGTH = 120;
@@ -102,6 +107,24 @@ function mapPersistedMessage(row: MessageRow): PersistedChatMessage {
     content: row.content,
     createdAt: row.created_at
   };
+}
+
+function assertOwnedChatExists(userId: string, chatId: string) {
+  const db = getDb();
+  const chatExists = db
+    .prepare(
+      `
+        select 1 as found
+        from chats
+        where id = ?
+          and owner_user_id = ?
+      `
+    )
+    .get(chatId, userId) as { found: number } | undefined;
+
+  if (!chatExists) {
+    throw new ChatStoreError("Chat not found.", 404);
+  }
 }
 
 function getChatSummary(userId: string, chatId: string) {
@@ -285,26 +308,69 @@ export function appendMessage(
   };
 }
 
-export function listMessagesForHermes(
-  userId: string,
-  chatId: string,
-  limit: number
-) {
+export function getChatHermesSessionId(userId: string, chatId: string) {
   const db = getDb();
-  const chatExists = db
+  const row = db
     .prepare(
       `
-        select 1 as found
+        select hermes_session_id
         from chats
+        where id = ?
+          and owner_user_id = ?
+        limit 1
+      `
+    )
+    .get(chatId, userId) as ChatHermesSessionRow | undefined;
+
+  if (!row) {
+    throw new ChatStoreError("Chat not found.", 404);
+  }
+
+  return row.hermes_session_id;
+}
+
+export function setChatHermesSessionId(
+  userId: string,
+  chatId: string,
+  hermesSessionId: string
+) {
+  const db = getDb();
+  const result = db
+    .prepare(
+      `
+        update chats
+        set hermes_session_id = ?
         where id = ?
           and owner_user_id = ?
       `
     )
-    .get(chatId, userId) as { found: number } | undefined;
+    .run(hermesSessionId, chatId, userId);
 
-  if (!chatExists) {
+  if (result.changes === 0) {
     throw new ChatStoreError("Chat not found.", 404);
   }
+}
+
+export function listMessagesForHermes(
+  userId: string,
+  chatId: string,
+  limit: number,
+  options?: {
+    excludeMessageId?: string;
+  }
+) {
+  const db = getDb();
+  const excludeMessageId = options?.excludeMessageId?.trim();
+  const excludeClause = excludeMessageId ? "and id != ?" : "";
+  const parameters: Array<number | string> = [chatId];
+
+  assertOwnedChatExists(userId, chatId);
+
+  if (excludeMessageId) {
+    parameters.push(excludeMessageId);
+  }
+
+  parameters.push(limit);
 
   const rows = db
     .prepare(
@@ -314,13 +380,14 @@ export function listMessagesForHermes(
           select role, content, created_at, id
           from messages
           where chat_id = ?
+            ${excludeClause}
           order by created_at desc, id desc
           limit ?
         ) recent_messages
         order by created_at asc, id asc
       `
     )
-    .all(chatId, limit) as ChatMessage[];
+    .all(...parameters) as ChatMessage[];
 
   return rows;
 }

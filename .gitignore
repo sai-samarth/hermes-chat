@@ -3,6 +3,8 @@ node_modules
 out
 .DS_Store
 npm-debug.log*
+__pycache__/
+*.pyc
 .env*
 !.env.example
 data/*.sqlite*
