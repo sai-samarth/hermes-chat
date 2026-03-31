@@ -75,12 +75,7 @@ type StreamErrorEvent = {
   error?: string;
 };
 
-type ThreadDetailFact = {
-  label: string;
-  value: string;
-};
-
-type AuthMode = "login" | "register";
+type AuthMode="login" | "register";
 
 async function readJson<T>(response: Response): Promise<T | null> {
   return (await response.json().catch(() => null)) as T | null;
@@ -242,20 +237,6 @@ export default function Home() {
     isLoggingOut;
   const composerBusy = sidebarBusy || !selectedChatId;
   const authBusy = authPending || sessionState === "loading";
-  const threadFacts: ThreadDetailFact[] = [
-    {
-      label: "Boundary",
-      value: "Local Hermes bridge"
-    },
-    {
-      label: "Persistence",
-      value: "SQLite file"
-    },
-    {
-      label: "Auth",
-      value: "Local email/password"
-    }
-  ];
 
   const resetWorkspaceState = useCallback(() => {
     setChats([]);
@@ -745,25 +726,21 @@ export default function Home() {
 
               <div>
                 <p className="eyebrow">Hermes Chat</p>
-                <p className="sidebar-title">Local auth workspace</p>
+                <p className="sidebar-title">Private by default</p>
               </div>
             </div>
 
-            <h1 className="auth-title">Private local chat history, scoped per account.</h1>
+            <h1 className="auth-title">A quieter place to think with Hermes.</h1>
             <p className="auth-copy">
-              Sign in with email and password to unlock your own SQLite-backed
-              workspace. Hermes now runs through a local bridge that keeps
-              profiles isolated per account and sessions stable per chat.
+              Your chats stay personal, persistent, and easy to return to.
+              Sign in to continue your workspace.
             </p>
 
-            <dl className="auth-facts" aria-label="Current backend slice">
-              {threadFacts.map((fact) => (
-                <div key={fact.label}>
-                  <dt>{fact.label}</dt>
-                  <dd>{fact.value}</dd>
-                </div>
-              ))}
-            </dl>
+            <div className="auth-points" aria-label="Product benefits">
+              <p>Private conversations on this machine</p>
+              <p>One chat thread that stays in context</p>
+              <p>Fast, focused workspace without extra noise</p>
+            </div>
           </div>
 
           <section className="auth-panel" aria-label="Authentication">
@@ -793,16 +770,16 @@ export default function Home() {
             </div>
 
             <div className="auth-panel-copy">
-              <p className="eyebrow">Local session</p>
+              <p className="eyebrow">Welcome</p>
               <h2>
                 {authMode === "login"
                   ? "Return to your workspace"
-                  : "Create a local account"}
+                  : "Create your workspace"}
               </h2>
               <p>
                 {authMode === "login"
-                  ? "Your session is issued from the Next.js backend as an HttpOnly cookie."
-                  : "New accounts are stored locally in SQLite with secure password hashing."}
+                  ? "Pick up where you left off."
+                  : "Set up a personal space for ongoing conversations with Hermes."}
               </p>
             </div>
 
@@ -844,10 +821,10 @@ export default function Home() {
               ) : (
                 <p className="auth-status" aria-live="polite">
                   {sessionState === "loading"
-                    ? "Checking for an active local session..."
+                    ? "Checking your session..."
                     : authMode === "login"
-                      ? "Use the account you already created on this local instance."
-                      : "Passwords are hashed before they are written to SQLite."}
+                      ? "Use the email and password for this workspace."
+                      : "Use at least 8 characters for your password."}
                 </p>
               )}
 
@@ -876,10 +853,9 @@ export default function Home() {
 
             <div>
               <p className="eyebrow">Hermes Chat</p>
-              <p className="sidebar-title">Support workspace</p>
+              <p className="sidebar-title">Workspace</p>
               <p className="sidebar-intro">
-                Personal local conversations, secure cookie sessions, and
-                Hermes-backed chat history in one restrained workspace.
+                Focused conversations, kept in place.
               </p>
             </div>
           </div>
@@ -932,7 +908,7 @@ export default function Home() {
 
           <div className="sidebar-foot">
             <div className="sidebar-account">
-              <p className="sidebar-note-title">Signed in as</p>
+              <p className="sidebar-note-title">Account</p>
               <p className="sidebar-account-email">{sessionUser.email}</p>
             </div>
 
@@ -944,20 +920,13 @@ export default function Home() {
             >
               {isLoggingOut ? "Signing out..." : "Log out"}
             </button>
-
-            <p className="sidebar-note-title">Backend slice</p>
-            <p className="sidebar-note">
-              Chats are now scoped to a local user account with secure cookie
-              sessions, while Hermes runs through a local bridge with isolated
-              profiles and per-chat sessions. Postgres can come later.
-            </p>
           </div>
         </aside>
 
-        <section className="chat-panel" aria-label="Support workspace">
+        <section className="chat-panel" aria-label="Chat workspace">
           <header className="chat-topbar">
             <div className="chat-title-block">
-              <p className="eyebrow">Local workspace</p>
+              <p className="eyebrow">Conversation</p>
 
               <div className="chat-heading-row">
                 <h1>
@@ -965,29 +934,18 @@ export default function Home() {
                     (isBootstrapping
                       ? "Loading chats"
                       : chats.length === 0
-                        ? "Create your first chat"
+                        ? "Start a new chat"
                         : "Choose a chat")}
                 </h1>
-                <span className="review-pill">Auth slice</span>
               </div>
 
               <p className="chat-summary">
-                Chats now persist in a local SQLite file under your account,
-                refresh keeps your personal history intact, and Hermes now runs
-                behind a local bridge with per-user profiles and per-chat
-                sessions.
+                {currentChat
+                  ? "A persistent thread with Hermes."
+                  : chats.length === 0
+                    ? "Create a chat to begin."
+                    : "Pick a conversation from the sidebar."}
               </p>
-            </div>
-
-            <div className="chat-context">
-              <dl className="chat-facts" aria-label="Thread details">
-                {threadFacts.map((fact) => (
-                  <div key={fact.label}>
-                    <dt>{fact.label}</dt>
-                    <dd>{fact.value}</dd>
-                  </div>
-                ))}
-              </dl>
             </div>
           </header>
 
@@ -998,10 +956,12 @@ export default function Home() {
           >
             <p className="timeline-mark">
               {isBootstrapping
-                ? "Loading chats"
+                ? "Loading"
                 : isLoadingChat
-                  ? "Loading history"
-                  : "Scoped history"}
+                  ? "Opening chat"
+                  : currentChat
+                    ? "Live transcript"
+                    : "Conversation"}
             </p>
 
             {loadError ? (
@@ -1021,8 +981,8 @@ export default function Home() {
                 </div>
                 <p className="message-copy">
                   {selectedChatId
-                    ? "This chat is empty. Send the first message and the transcript will be stored in SQLite under your account."
-                    : "No chat is selected yet. Create one to start a private local transcript."}
+                    ? "Send the first message to begin the conversation."
+                    : "Create a chat to get started."}
                 </p>
               </article>
             ) : null}
@@ -1040,7 +1000,7 @@ export default function Home() {
                 <p className="message-copy">
                   {message.content ||
                     (message.role === "assistant" && isSending
-                      ? "Hermes is drafting through the local bridge..."
+                      ? "Thinking…"
                       : "")}
                 </p>
               </article>
@@ -1060,14 +1020,12 @@ export default function Home() {
                   name="chat-draft"
                   value={draft}
                   onChange={(event) => setDraft(event.target.value)}
-                  placeholder="Confirm procurement coverage, keep approval language precise, and leave the customer with one clear next step."
+                  placeholder="Message Hermes"
                   rows={4}
                   disabled={composerBusy}
                 />
                 <p className="composer-copy">
-                  Personal workspace with SQLite-backed chat history, local
-                  email/password auth, isolated Hermes profiles, and stable
-                  per-chat Hermes sessions.
+                  Keep it short, or paste a full prompt.
                 </p>
               </div>
 
@@ -1079,12 +1037,12 @@ export default function Home() {
                 ) : (
                   <p className="composer-status" aria-live="polite">
                     {isSending
-                      ? "Hermes is drafting a persisted reply..."
+                      ? "Hermes is responding..."
                       : isLoadingChat
-                        ? "Loading selected chat history..."
+                        ? "Loading chat..."
                         : !selectedChatId
-                          ? "Create a chat to start a new transcript."
-                          : "Messages are stored locally and scoped to your account."}
+                          ? "Create a chat to begin."
+                          : "Ready."}
                   </p>
                 )}
 

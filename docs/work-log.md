@@ -96,3 +96,18 @@ SSE streaming slice:
   and `npm run build` all pass.
 - Manually validated the bridge streaming endpoint with a direct `curl -N`
   request against a local bridge instance on port `8645`.
+
+UI cleanup pass:
+
+- Researched calmer dark-mode chat/product references and pulled the design
+  direction toward a quieter, more restrained shell.
+- Reworked the auth screen copy to remove most backend/demo language and make it
+  read like a product front door instead of a local infrastructure panel.
+- Shifted the visual language to dark mode by default with flatter surfaces,
+  fewer loud accents, and a tighter monochrome palette.
+- Simplified the workspace shell by removing visible backend/status framing,
+  calming the sidebar, and reducing explanatory copy in the chat area and
+  composer.
+- Replaced noisy transcript/composer status language with shorter, calmer UI
+  text.
+- Re-ran `npm run lint` and `npm run build` after the UI pass.
