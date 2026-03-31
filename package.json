@@ -7,7 +7,8 @@
     "bridge": "python3 bridge/hermes_bridge.py",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint . --max-warnings=0"
+    "lint": "eslint . --max-warnings=0",
+    "test": "vitest run && python3 -m unittest discover -s tests_python -p 'test_*.py'"
   },
   "dependencies": {
     "better-sqlite3": "^12.8.0",
@@ -22,6 +23,7 @@
     "@types/react-dom": "^19.2.3",
     "eslint": "^9.39.4",
     "eslint-config-next": "^16.2.1",
-    "typescript": "^6.0.2"
+    "typescript": "^6.0.2",
+    "vitest": "^3.2.4"
   }
 }

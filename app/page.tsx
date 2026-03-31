@@ -13,6 +13,7 @@ import type {
   ChatSummary,
   PersistedChatMessage
 } from "@/lib/chat-types";
+import { createSseParser, type ParsedSseEvent } from "@/lib/sse";
 
 const DEFAULT_CHAT_TITLE = "New chat";
 const MAX_CHAT_TITLE_LENGTH = 80;
@@ -61,6 +62,17 @@ type SendMessageResponse = {
   chat: ChatSummary;
   message: PersistedChatMessage;
   userMessage: PersistedChatMessage;
+};
+
+type StreamDeltaEvent = {
+  snapshot?: string;
+  text?: string;
+};
+
+type StreamDoneEvent = SendMessageResponse;
+
+type StreamErrorEvent = {
+  error?: string;
 };
 
 type ThreadDetailFact = {
@@ -141,6 +153,10 @@ function replaceMessage(
   });
 
   return replaced ? nextMessages : [...nextMessages, persistedMessage];
+}
+
+function removeMessage(messages: PersistedChatMessage[], messageId: string) {
+  return messages.filter((message) => message.id !== messageId);
 }
 
 function formatMessageTime(value: string) {
@@ -579,6 +595,12 @@ export default function Home() {
       content,
       createdAt: submittedAt
     };
+    const optimisticAssistantMessage: PersistedChatMessage = {
+      id: crypto.randomUUID(),
+      role: "assistant",
+      content: "",
+      createdAt: submittedAt
+    };
     const optimisticChat: ChatSummary = {
       ...currentChat,
       title:
@@ -590,16 +612,21 @@ export default function Home() {
       messageCount: currentChat.messageCount + 1
     };
 
-    setMessages((currentMessages) => [...currentMessages, optimisticMessage]);
+    setMessages((currentMessages) => [
+      ...currentMessages,
+      optimisticMessage,
+      optimisticAssistantMessage
+    ]);
     setChats((currentChats) => upsertChat(currentChats, optimisticChat));
     setDraft("");
     setComposerError(null);
     setIsSending(true);
 
     try {
-      const response = await fetch("/api/chat", {
+      const response = await fetch("/api/chat?stream=1", {
         method: "POST",
         headers: {
+          Accept: "text/event-stream",
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
@@ -607,39 +634,97 @@ export default function Home() {
           content
         })
       });
-      const payload = await readJson<SendMessageResponse & ApiErrorResponse>(
-        response
-      );
 
       if (response.status === 401) {
+        const payload = await readJson<ApiErrorResponse>(response);
         moveToSignedOut(payload?.error ?? "Session expired. Log in again.");
         return;
       }
 
       if (!response.ok) {
+        const payload = await readJson<ApiErrorResponse>(response);
         throw new Error(payload?.error ?? "The Hermes request failed.");
       }
 
-      if (!payload?.chat || !payload.message || !payload.userMessage) {
-        throw new Error("Hermes returned an unexpected response shape.");
+      if (!response.body) {
+        throw new Error("The Hermes stream returned no response body.");
       }
 
-      setChats((currentChats) => upsertChat(currentChats, payload.chat));
-      setMessages((currentMessages) => {
-        const messagesWithPersistedUser = replaceMessage(
-          currentMessages,
-          optimisticMessage.id,
-          payload.userMessage
-        );
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      const parser = createSseParser();
+      let finished = false;
 
-        return [
-          ...messagesWithPersistedUser.filter(
-            (message) => message.id !== payload.message.id
-          ),
-          payload.message
-        ];
-      });
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (done) {
+          break;
+        }
+
+        const chunk = decoder.decode(value, { stream: true });
+        const events = parser.push(chunk);
+
+        for (const streamEvent of events) {
+          if (streamEvent.event === "delta") {
+            const deltaEvent = streamEvent as ParsedSseEvent<StreamDeltaEvent>;
+            const snapshot = deltaEvent.data?.snapshot ?? "";
+
+            setMessages((currentMessages) =>
+              currentMessages.map((message) =>
+                message.id === optimisticAssistantMessage.id
+                  ? { ...message, content: snapshot }
+                  : message
+              )
+            );
+            continue;
+          }
+
+          if (streamEvent.event === "done") {
+            const doneEvent = streamEvent as ParsedSseEvent<StreamDoneEvent>;
+            const payload = doneEvent.data;
+
+            if (!payload?.chat || !payload.message || !payload.userMessage) {
+              throw new Error("Hermes returned an unexpected response shape.");
+            }
+
+            setChats((currentChats) => upsertChat(currentChats, payload.chat));
+            setMessages((currentMessages) => {
+              const messagesWithPersistedUser = replaceMessage(
+                currentMessages,
+                optimisticMessage.id,
+                payload.userMessage
+              );
+
+              return replaceMessage(
+                messagesWithPersistedUser,
+                optimisticAssistantMessage.id,
+                payload.message
+              );
+            });
+            finished = true;
+            break;
+          }
+
+          if (streamEvent.event === "error") {
+            const errorEvent = streamEvent as ParsedSseEvent<StreamErrorEvent>;
+            throw new Error(errorEvent.data?.error ?? "The Hermes request failed.");
+          }
+        }
+
+        if (finished) {
+          await reader.cancel();
+          break;
+        }
+      }
+
+      if (!finished) {
+        throw new Error("The Hermes stream ended before completion.");
+      }
     } catch (error) {
+      setMessages((currentMessages) =>
+        removeMessage(currentMessages, optimisticAssistantMessage.id)
+      );
       setComposerError(
         error instanceof Error
           ? error.message
@@ -952,25 +1037,15 @@ export default function Home() {
                   <span>{formatMessageTime(message.createdAt)}</span>
                 </div>
 
-                <p className="message-copy">{message.content}</p>
+                <p className="message-copy">
+                  {message.content ||
+                    (message.role === "assistant" && isSending
+                      ? "Hermes is drafting through the local bridge..."
+                      : "")}
+                </p>
               </article>
             ))}
 
-            {isSending ? (
-              <article
-                className="message message-assistant message-pending"
-                aria-live="polite"
-              >
-                <div className="message-meta">
-                  <span>Hermes</span>
-                  <span>Drafting</span>
-                </div>
-                <p className="message-copy">
-                  User message persisted. Request in flight through the local
-                  Hermes bridge.
-                </p>
-              </article>
-            ) : null}
           </div>
 
           <footer className="composer-shell" aria-label="Chat composer">

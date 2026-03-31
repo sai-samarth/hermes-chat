@@ -34,8 +34,11 @@ adapter.
 - Older chats without a stored Hermes session ID send a one-time bootstrap
   history payload on their first bridge-backed turn
 - UI supports a signed-out auth screen plus an authenticated workspace with
-  persisted chats, selection, loading state, and assistant replies
-- No OAuth, password reset, email verification, attachments, or streaming have
-  been added
+  persisted chats, selection, loading state, assistant replies, and live SSE
+  streaming while Hermes is responding
+- Streaming now flows browser → Next.js API route → localhost bridge →
+  profile-scoped Hermes worker, then persists the final assistant message on
+  stream completion
+- No OAuth, password reset, email verification, or attachments have been added
 - Postgres and the final gateway-native Hermes web/session model are still
   deferred

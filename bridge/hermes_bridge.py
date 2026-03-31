@@ -8,13 +8,15 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import threading
+import traceback
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 API_KEY_HEADER = "X-Hermes-Bridge-Key"
 DEFAULT_HOST = "127.0.0.1"
@@ -22,16 +24,14 @@ DEFAULT_PORT = 8643
 MAX_BODY_BYTES = 256 * 1024
 PROFILE_CREATE_TIMEOUT_SECONDS = 180
 CHAT_TIMEOUT_SECONDS = 600
-QUIET_OUTPUT_PATTERN = re.compile(
-    r"(?s)^(?P<message>.*?)(?:\n+session_id:\s*(?P<session_id>[^\n]+)\s*)$"
-)
-CREDENTIAL_MIGRATION_PATTERN = re.compile(
-    r"(?s)^⚠️\s+Migrating Codex credentials to Hermes's own auth store\.\n"
-    r"\s+This avoids conflicts with Codex CLI and VS Code\.\n"
-    r"\s+Run `hermes login` to create a fully independent session\.\n+"
-)
 REPO_ROOT = Path(__file__).resolve().parent.parent
+WORKER_SCRIPT = REPO_ROOT / "bridge" / "hermes_stream_worker.py"
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
+WORKER_NOISE_PREFIXES = (
+    "⚠️  Migrating Codex credentials to Hermes's own auth store.",
+    "This avoids conflicts with Codex CLI and VS Code.",
+    "Run `hermes login` to create a fully independent session."
+)
 
 _provision_lock = threading.Lock()
 _provisioned_profiles: set[str] = set()
@@ -330,100 +330,270 @@ def require_non_empty_string(payload: dict[str, Any], key: str) -> str:
     return value.strip()
 
 
-def build_query(message: str, history: list[dict[str, str]]) -> str:
-    if not history:
-        return message
+def parse_optional_session_id(payload: dict[str, Any]) -> str | None:
+    raw_session_id = payload.get("hermes_session_id")
 
-    transcript_lines = [
-        "Continue this existing conversation naturally.",
-        "Treat the transcript below as prior context and reply only to the final user message.",
-        "Do not mention that the transcript was provided out of band.",
-        "",
-        "Transcript:"
-    ]
+    if raw_session_id is None:
+        return None
 
-    role_labels = {
-        "system": "System",
-        "user": "User",
-        "assistant": "Assistant"
+    if isinstance(raw_session_id, str) and raw_session_id.strip():
+        return raw_session_id.strip()
+
+    raise BridgeError(
+        "`hermes_session_id` must be a non-empty string when provided.",
+        HTTPStatus.BAD_REQUEST
+    )
+
+
+def parse_optional_history(payload: dict[str, Any]) -> list[dict[str, str]]:
+    raw_history = payload.get("history")
+
+    if raw_history is None:
+        return []
+
+    if not isinstance(raw_history, list):
+        raise BridgeError(
+            "`history` must be an array when provided.",
+            HTTPStatus.BAD_REQUEST
+        )
+
+    return [normalize_history_entry(index, entry) for index, entry in enumerate(raw_history)]
+
+
+def format_sse_event(event: str, data: dict[str, Any]) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, separators=(",", ":"))}\n\n"
+
+
+def parse_worker_event_line(line: str) -> dict[str, Any] | None:
+    normalized = line.strip()
+
+    if not normalized:
+        return None
+
+    if normalized.startswith(WORKER_NOISE_PREFIXES):
+        return None
+
+    try:
+        payload = json.loads(normalized)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Worker output was not valid JSON: {normalized!r}") from exc
+
+    if not isinstance(payload, dict):
+        raise ValueError("Worker output must be a JSON object.")
+
+    return payload
+
+
+def get_worker_python() -> str:
+    configured = os.environ.get("HERMES_BRIDGE_WORKER_PYTHON", "").strip()
+
+    if configured:
+        return configured
+
+    hermes_command = get_hermes_command()
+    hermes_executable = shutil.which(hermes_command[0]) or hermes_command[0]
+
+    if os.path.isfile(hermes_executable):
+        try:
+            with open(hermes_executable, "r", encoding="utf-8") as handle:
+                first_line = handle.readline().strip()
+            if first_line.startswith("#!"):
+                interpreter = first_line[2:].strip()
+                if interpreter:
+                    return shlex.split(interpreter)[0]
+        except OSError:
+            pass
+
+    return sys.executable
+
+
+def get_worker_command() -> list[str]:
+    return [get_worker_python(), "-u", str(WORKER_SCRIPT)]
+
+
+def spawn_worker(
+    *,
+    profile_name: str,
+    message: str,
+    hermes_session_id: str | None,
+    history: list[dict[str, str]]
+) -> subprocess.Popen[str]:
+    if not WORKER_SCRIPT.is_file():
+        raise BridgeError(
+            f"Hermes worker script not found: {WORKER_SCRIPT}",
+            HTTPStatus.BAD_GATEWAY
+        )
+
+    payload = {
+        "profile_name": profile_name,
+        "message": message,
+        "history": history
     }
 
-    for entry in history:
-        transcript_lines.append(f"{role_labels[entry['role']]}: {entry['content']}")
+    if hermes_session_id:
+        payload["hermes_session_id"] = hermes_session_id
 
-    transcript_lines.extend(["", f"User: {message}"])
-    return "\n".join(transcript_lines)
-
-
-def parse_quiet_output(stdout: str) -> tuple[str, str]:
-    normalized_stdout = CREDENTIAL_MIGRATION_PATTERN.sub("", stdout.lstrip())
-    match = QUIET_OUTPUT_PATTERN.match(normalized_stdout.strip())
-
-    if not match:
-        raise BridgeError(
-            "Hermes returned unexpected quiet-mode output.",
-            HTTPStatus.BAD_GATEWAY
+    try:
+        process = subprocess.Popen(
+            get_worker_command(),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=str(REPO_ROOT)
         )
-
-    message = match.group("message").strip()
-    session_id = match.group("session_id").strip()
-
-    if not message:
+    except FileNotFoundError as exc:
         raise BridgeError(
-            "Hermes returned an empty assistant message.",
+            "Hermes worker failed because Python was not found.",
             HTTPStatus.BAD_GATEWAY
-        )
+        ) from exc
 
-    if not session_id:
-        raise BridgeError(
-            "Hermes returned an empty session id.",
-            HTTPStatus.BAD_GATEWAY
-        )
-
-    return message, session_id
+    assert process.stdin is not None
+    process.stdin.write(json.dumps(payload))
+    process.stdin.close()
+    return process
 
 
-def run_chat(
+def finalize_worker_process(process: subprocess.Popen[str]) -> tuple[int, str]:
+    try:
+        stderr_text = process.stderr.read() if process.stderr is not None else ""
+    finally:
+        returncode = process.wait(timeout=5)
+
+    return returncode, stderr_text.strip()
+
+
+def run_worker_chat(
     *,
     profile_name: str,
     message: str,
     hermes_session_id: str | None,
     history: list[dict[str, str]]
 ) -> dict[str, str]:
-    query = build_query(message, history if hermes_session_id is None else [])
-    command = get_hermes_command() + ["-p", profile_name, "chat", "-Q", "-q", query]
-    workspace = get_profile_workspace(profile_name)
-    workspace.mkdir(parents=True, exist_ok=True)
-
-    if hermes_session_id:
-        command.extend(["--resume", hermes_session_id])
-
-    result = run_command(
-        command,
-        timeout_seconds=CHAT_TIMEOUT_SECONDS,
-        description="Hermes chat request",
-        cwd=workspace
+    process = spawn_worker(
+        profile_name=profile_name,
+        message=message,
+        hermes_session_id=hermes_session_id,
+        history=history
     )
+    assert process.stdout is not None
+
+    final_payload: dict[str, Any] | None = None
+    delta_parts: list[str] = []
 
     try:
-        assistant_message, next_session_id = parse_quiet_output(result.stdout)
-    except BridgeError:
-        if result.returncode != 0:
-            raise BridgeError(
-                f"Hermes chat request failed: {command_output_detail(result)}"
-            )
+        for raw_line in process.stdout:
+            event = parse_worker_event_line(raw_line)
+            if event is None:
+                continue
+            event_type = event.get("type")
 
-        raise
+            if event_type == "delta":
+                delta = event.get("delta")
+                if isinstance(delta, str) and delta:
+                    delta_parts.append(delta)
+                continue
 
-    return {
-        "message": assistant_message,
-        "hermes_profile_name": profile_name,
-        "hermes_session_id": next_session_id
-    }
+            if event_type == "done":
+                final_payload = event
+                break
+
+            if event_type == "error":
+                raise BridgeError(
+                    str(event.get("error") or "Hermes worker returned an unknown error."),
+                    HTTPStatus.BAD_GATEWAY
+                )
+
+        returncode, stderr_text = finalize_worker_process(process)
+
+        if final_payload is None:
+            detail = stderr_text or "Hermes worker ended before producing a final response."
+            raise BridgeError(detail, HTTPStatus.BAD_GATEWAY)
+
+        message_text = final_payload.get("message")
+        next_session_id = final_payload.get("hermes_session_id")
+        returned_profile_name = final_payload.get("hermes_profile_name")
+
+        if not isinstance(message_text, str) or not message_text.strip():
+            message_text = "".join(delta_parts).strip()
+
+        if not isinstance(message_text, str) or not message_text.strip():
+            raise BridgeError("Hermes worker returned an empty assistant message.")
+
+        if not isinstance(next_session_id, str) or not next_session_id.strip():
+            raise BridgeError("Hermes worker returned an empty session id.")
+
+        if not isinstance(returned_profile_name, str) or not returned_profile_name.strip():
+            raise BridgeError("Hermes worker returned an empty profile name.")
+
+        if returncode not in {0, None}:
+            detail = stderr_text or f"Hermes worker exited with status {returncode}."
+            raise BridgeError(detail, HTTPStatus.BAD_GATEWAY)
+
+        return {
+            "message": message_text.strip(),
+            "hermes_profile_name": returned_profile_name.strip(),
+            "hermes_session_id": next_session_id.strip()
+        }
+    finally:
+        try:
+            if process.stdout is not None:
+                process.stdout.close()
+        except Exception:
+            pass
+        try:
+            if process.stderr is not None:
+                process.stderr.close()
+        except Exception:
+            pass
+
+
+def iter_worker_events(
+    *,
+    profile_name: str,
+    message: str,
+    hermes_session_id: str | None,
+    history: list[dict[str, str]]
+) -> Iterator[dict[str, Any]]:
+    process = spawn_worker(
+        profile_name=profile_name,
+        message=message,
+        hermes_session_id=hermes_session_id,
+        history=history
+    )
+    assert process.stdout is not None
+
+    try:
+        for raw_line in process.stdout:
+            event = parse_worker_event_line(raw_line)
+            if event is None:
+                continue
+            yield event
+
+        returncode, stderr_text = finalize_worker_process(process)
+
+        if returncode not in {0, None}:
+            detail = stderr_text or f"Hermes worker exited with status {returncode}."
+            raise BridgeError(detail, HTTPStatus.BAD_GATEWAY)
+    finally:
+        try:
+            if process.stdout is not None:
+                process.stdout.close()
+        except Exception:
+            pass
+        try:
+            if process.stderr is not None:
+                process.stderr.close()
+        except Exception:
+            pass
 
 
 class HermesBridgeHandler(BaseHTTPRequestHandler):
-    server_version = "HermesBridge/0.1"
+    server_version = "HermesBridge/0.2"
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self._sse_started = False
+        super().__init__(*args, **kwargs)
 
     def do_GET(self) -> None:
         if self.path != "/health":
@@ -433,7 +603,7 @@ class HermesBridgeHandler(BaseHTTPRequestHandler):
         self.write_json(HTTPStatus.OK, {"ok": True})
 
     def do_POST(self) -> None:
-        if self.path != "/v1/chat":
+        if self.path not in {"/v1/chat", "/v1/chat/stream"}:
             self.write_json(HTTPStatus.NOT_FOUND, {"error": "Not found."})
             return
 
@@ -454,48 +624,69 @@ class HermesBridgeHandler(BaseHTTPRequestHandler):
             require_non_empty_string(payload, "app_user_email")
             chat_id = require_non_empty_string(payload, "chat_id")
             message = require_non_empty_string(payload, "message")
-
-            raw_session_id = payload.get("hermes_session_id")
-            if raw_session_id is None:
-                hermes_session_id = None
-            elif isinstance(raw_session_id, str) and raw_session_id.strip():
-                hermes_session_id = raw_session_id.strip()
-            else:
-                raise BridgeError(
-                    "`hermes_session_id` must be a non-empty string when provided.",
-                    HTTPStatus.BAD_REQUEST
-                )
-
-            raw_history = payload.get("history")
-            if raw_history is None:
-                history: list[dict[str, str]] = []
-            elif isinstance(raw_history, list):
-                history = [
-                    normalize_history_entry(index, entry)
-                    for index, entry in enumerate(raw_history)
-                ]
-            else:
-                raise BridgeError(
-                    "`history` must be an array when provided.",
-                    HTTPStatus.BAD_REQUEST
-                )
-
+            hermes_session_id = parse_optional_session_id(payload)
+            history = parse_optional_history(payload)
             profile_name = derive_profile_name(app_user_id)
             ensure_profile_exists(profile_name)
             lock_key = hermes_session_id or f"{profile_name}:{chat_id}"
 
             with get_request_lock(lock_key):
-                response_payload = run_chat(
+                if self.path == "/v1/chat":
+                    response_payload = run_worker_chat(
+                        profile_name=profile_name,
+                        message=message,
+                        hermes_session_id=hermes_session_id,
+                        history=history
+                    )
+                    self.write_json(HTTPStatus.OK, response_payload)
+                    return
+
+                self.write_sse_headers(HTTPStatus.OK)
+                for event in iter_worker_events(
                     profile_name=profile_name,
                     message=message,
                     hermes_session_id=hermes_session_id,
                     history=history
-                )
+                ):
+                    event_type = event.get("type")
 
-            self.write_json(HTTPStatus.OK, response_payload)
+                    if event_type == "delta":
+                        delta = event.get("delta")
+                        if isinstance(delta, str) and delta:
+                            self.write_sse_event("delta", {"text": delta})
+                        continue
+
+                    if event_type == "done":
+                        self.write_sse_event(
+                            "done",
+                            {
+                                "message": event.get("message", ""),
+                                "hermes_profile_name": event.get("hermes_profile_name", profile_name),
+                                "hermes_session_id": event.get("hermes_session_id", hermes_session_id or "")
+                            }
+                        )
+                        return
+
+                    if event_type == "error":
+                        raise BridgeError(
+                            str(event.get("error") or "Hermes worker returned an unknown error."),
+                            HTTPStatus.BAD_GATEWAY
+                        )
+
+                raise BridgeError(
+                    "Hermes worker ended before producing a final stream event.",
+                    HTTPStatus.BAD_GATEWAY
+                )
         except BridgeError as exc:
+            if self.path == "/v1/chat/stream":
+                self.try_write_sse_error(str(exc))
+                return
             self.write_json(exc.status, {"error": str(exc)})
         except Exception:
+            traceback.print_exc(file=sys.stderr)
+            if self.path == "/v1/chat/stream":
+                self.try_write_sse_error("Unexpected bridge server error.")
+                return
             self.write_json(
                 HTTPStatus.INTERNAL_SERVER_ERROR,
                 {"error": "Unexpected bridge server error."}
@@ -534,6 +725,27 @@ class HermesBridgeHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(encoded)))
         self.end_headers()
         self.wfile.write(encoded)
+
+    def write_sse_headers(self, status: int) -> None:
+        self._sse_started = True
+        self.send_response(status)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+
+    def write_sse_event(self, event: str, payload: dict[str, Any]) -> None:
+        encoded = format_sse_event(event, payload).encode("utf-8")
+        self.wfile.write(encoded)
+        self.wfile.flush()
+
+    def try_write_sse_error(self, message: str) -> None:
+        try:
+            if not self._sse_started:
+                self.write_sse_headers(HTTPStatus.OK)
+            self.write_sse_event("error", {"error": message})
+        except Exception:
+            pass
 
     def client_is_loopback(self) -> bool:
         raw_host = self.client_address[0]

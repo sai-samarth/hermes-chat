@@ -2,7 +2,7 @@ import "server-only";
 
 import type { ChatMessage } from "@/lib/chat-types";
 
-type HermesBridgeChatRequest = {
+export type HermesBridgeChatRequest = {
   app_user_email: string;
   app_user_id: string;
   chat_id: string;
@@ -21,6 +21,8 @@ type HermesBridgeConfig = {
   apiKey?: string;
   baseUrl: string;
 };
+
+const DEFAULT_HERMES_BRIDGE_URL = "http://127.0.0.1:8643";
 
 export type HermesChatTurnInput = {
   appUserEmail: string;
@@ -48,20 +50,44 @@ export class HermesClientError extends Error {
 }
 
 function getHermesConfig(): HermesBridgeConfig {
-  const baseUrl = process.env.HERMES_BRIDGE_URL?.trim();
+  const configuredBaseUrl = process.env.HERMES_BRIDGE_URL?.trim();
+  const legacyApiBaseUrl = process.env.HERMES_API_BASE_URL?.trim();
   const apiKey = process.env.HERMES_BRIDGE_API_KEY?.trim();
 
-  if (!baseUrl) {
-    throw new HermesClientError(
-      "Hermes bridge is not configured. Set HERMES_BRIDGE_URL.",
-      500
+  if (!configuredBaseUrl && legacyApiBaseUrl) {
+    console.warn(
+      "HERMES_API_BASE_URL is still set, but hermes-chat now uses the local Hermes bridge. Falling back to the default bridge URL http://127.0.0.1:8643."
     );
   }
 
+  const baseUrl = (configuredBaseUrl || DEFAULT_HERMES_BRIDGE_URL).replace(
+    /\/+$/,
+    ""
+  );
+
   return {
     apiKey,
-    baseUrl: baseUrl.replace(/\/+$/, "")
+    baseUrl
   };
+}
+
+function buildBridgeRequestBody(input: HermesChatTurnInput): HermesBridgeChatRequest {
+  const requestBody: HermesBridgeChatRequest = {
+    app_user_id: input.appUserId,
+    app_user_email: input.appUserEmail,
+    chat_id: input.chatId,
+    message: input.message
+  };
+
+  if (input.hermesSessionId) {
+    requestBody.hermes_session_id = input.hermesSessionId;
+  }
+
+  if (input.history && input.history.length > 0) {
+    requestBody.history = input.history;
+  }
+
+  return requestBody;
 }
 
 async function readErrorDetail(response: Response): Promise<string | undefined> {
@@ -96,35 +122,22 @@ async function readErrorDetail(response: Response): Promise<string | undefined> 
   }
 }
 
-export async function createHermesChatTurn(
-  input: HermesChatTurnInput
-): Promise<HermesChatTurnResult> {
+async function requestBridge(
+  path: string,
+  input: HermesChatTurnInput,
+  headers?: Record<string, string>
+) {
   const { apiKey, baseUrl } = getHermesConfig();
-  const requestBody: HermesBridgeChatRequest = {
-    app_user_id: input.appUserId,
-    app_user_email: input.appUserEmail,
-    chat_id: input.chatId,
-    message: input.message
-  };
-
-  if (input.hermesSessionId) {
-    requestBody.hermes_session_id = input.hermesSessionId;
-  }
-
-  if (input.history && input.history.length > 0) {
-    requestBody.history = input.history;
-  }
-
-  let response: Response;
 
   try {
-    response = await fetch(`${baseUrl}/v1/chat`, {
+    return await fetch(`${baseUrl}${path}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(apiKey ? { "X-Hermes-Bridge-Key": apiKey } : {})
+        ...(apiKey ? { "X-Hermes-Bridge-Key": apiKey } : {}),
+        ...headers
       },
-      body: JSON.stringify(requestBody),
+      body: JSON.stringify(buildBridgeRequestBody(input)),
       cache: "no-store"
     });
   } catch {
@@ -133,6 +146,12 @@ export async function createHermesChatTurn(
       502
     );
   }
+}
+
+export async function createHermesChatTurn(
+  input: HermesChatTurnInput
+): Promise<HermesChatTurnResult> {
+  const response = await requestBridge("/v1/chat", input);
 
   if (!response.ok) {
     const detail = await readErrorDetail(response);
@@ -177,4 +196,28 @@ export async function createHermesChatTurn(
     hermesProfileName,
     hermesSessionId
   };
+}
+
+export async function createHermesChatTurnStream(input: HermesChatTurnInput) {
+  const response = await requestBridge("/v1/chat/stream", input, {
+    Accept: "text/event-stream"
+  });
+
+  if (!response.ok) {
+    const detail = await readErrorDetail(response);
+    const message = detail
+      ? `Hermes bridge stream failed: ${detail}`
+      : `Hermes bridge stream failed with status ${response.status}.`;
+
+    throw new HermesClientError(message, 502);
+  }
+
+  if (!response.body) {
+    throw new HermesClientError(
+      "Hermes bridge stream returned no response body.",
+      502
+    );
+  }
+
+  return response;
 }

@@ -45,8 +45,9 @@ Next.js app and the Python bridge.
 
 1. `npm run bridge`
 2. `npm run dev`
-3. `npm run lint`
-4. `npm run build`
+3. `npm test`
+4. `npm run lint`
+5. `npm run build`
 
 ## What Exists Today
 
@@ -63,6 +64,8 @@ Next.js app and the Python bridge.
 - Per-chat Hermes session persistence in SQLite via `chats.hermes_session_id`
 - One-time bootstrap history handoff for older chats that predate bridge-backed
   Hermes sessions
+- End-to-end SSE streaming from the browser through the Next.js API route,
+  through the local bridge, and into Hermes response generation
 
 ## Not Included Yet
 
@@ -72,6 +75,5 @@ Next.js app and the Python bridge.
 - Email verification
 - File uploads
 - Attachments
-- Streaming responses
 - Final gateway-native Hermes web adapter
 - Broader multi-route application structure

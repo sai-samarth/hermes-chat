@@ -13,10 +13,32 @@ import {
   listMessagesForHermes,
   setChatHermesSessionId
 } from "@/lib/chat-store";
-import { createHermesChatTurn, HermesClientError } from "@/lib/hermes";
+import {
+  createHermesChatTurn,
+  createHermesChatTurnStream,
+  HermesClientError
+} from "@/lib/hermes";
+import { createSseParser, encodeSseEvent, type ParsedSseEvent } from "@/lib/sse";
 
 const MAX_CONTEXT_MESSAGES = 40;
 const MAX_MESSAGE_LENGTH = 8000;
+
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
+
+type BridgeDeltaEvent = {
+  text?: string;
+};
+
+type BridgeDoneEvent = {
+  hermes_profile_name?: string;
+  hermes_session_id?: string;
+  message?: string;
+};
+
+type BridgeErrorEvent = {
+  error?: string;
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -57,7 +79,62 @@ function validateContent(value: unknown) {
   return content;
 }
 
+function isStreamingRequest(request: Request) {
+  const accept = request.headers.get("accept") ?? "";
+  const { searchParams } = new URL(request.url);
+
+  return searchParams.get("stream") === "1" || accept.includes("text/event-stream");
+}
+
+function buildBootstrapHistory(userId: string, chatId: string, hermesSessionId: string | null, excludeMessageId: string) {
+  if (hermesSessionId !== null) {
+    return undefined;
+  }
+
+  const bootstrapHistory = listMessagesForHermes(userId, chatId, MAX_CONTEXT_MESSAGES, {
+    excludeMessageId
+  });
+
+  return bootstrapHistory.length > 0 ? bootstrapHistory : undefined;
+}
+
+function streamHeaders() {
+  return {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive"
+  };
+}
+
+function errorJson(error: unknown) {
+  if (error instanceof AuthError) {
+    return NextResponse.json({ error: error.message }, { status: error.status });
+  }
+
+  if (error instanceof SyntaxError) {
+    return NextResponse.json(
+      { error: "Request body must be valid JSON." },
+      { status: 400 }
+    );
+  }
+
+  if (error instanceof HermesClientError) {
+    return NextResponse.json({ error: error.message }, { status: error.status });
+  }
+
+  if (error instanceof ChatStoreError) {
+    return NextResponse.json({ error: error.message }, { status: error.status });
+  }
+
+  return NextResponse.json(
+    { error: "Unexpected server error while requesting Hermes." },
+    { status: 500 }
+  );
+}
+
 export async function POST(request: Request) {
+  const wantsStreaming = isStreamingRequest(request);
+
   try {
     const user = await requireAuthenticatedUser();
     const payload = (await request.json()) as
@@ -77,71 +154,185 @@ export async function POST(request: Request) {
     });
 
     const hermesSessionId = getChatHermesSessionId(user.id, chatId);
-    const bootstrapHistory =
-      hermesSessionId === null
-        ? listMessagesForHermes(user.id, chatId, MAX_CONTEXT_MESSAGES, {
-            excludeMessageId: userMessage.id
-          })
-        : undefined;
-    const hermesTurn = await createHermesChatTurn({
+    const history = buildBootstrapHistory(
+      user.id,
+      chatId,
+      hermesSessionId,
+      userMessage.id
+    );
+
+    if (!wantsStreaming) {
+      const hermesTurn = await createHermesChatTurn({
+        appUserId: user.id,
+        appUserEmail: user.email,
+        chatId,
+        message: content,
+        hermesSessionId,
+        history
+      });
+
+      setUserHermesProfileName(user.id, hermesTurn.hermesProfileName);
+      setChatHermesSessionId(user.id, chatId, hermesTurn.hermesSessionId);
+
+      const message = appendMessage(user.id, chatId, hermesTurn.assistantMessage);
+      const chat = getChat(user.id, chatId);
+
+      if (!chat) {
+        throw new ChatStoreError("Chat not found.", 404);
+      }
+
+      return NextResponse.json({
+        chat: chat.chat,
+        userMessage,
+        message
+      });
+    }
+
+    const bridgeResponse = await createHermesChatTurnStream({
       appUserId: user.id,
       appUserEmail: user.email,
       chatId,
       message: content,
       hermesSessionId,
-      history:
-        bootstrapHistory && bootstrapHistory.length > 0
-          ? bootstrapHistory
-          : undefined
+      history
     });
 
-    setUserHermesProfileName(user.id, hermesTurn.hermesProfileName);
-    setChatHermesSessionId(user.id, chatId, hermesTurn.hermesSessionId);
+    const stream = new ReadableStream<Uint8Array>({
+      start: async (controller) => {
+        const reader = bridgeResponse.body?.getReader();
+        const parser = createSseParser();
+        let assistantText = "";
+        let completed = false;
 
-    const message = appendMessage(user.id, chatId, hermesTurn.assistantMessage);
-    const chat = getChat(user.id, chatId);
+        const sendEvent = (event: string, data: unknown) => {
+          controller.enqueue(textEncoder.encode(encodeSseEvent(event, data)));
+        };
 
-    if (!chat) {
-      throw new ChatStoreError("Chat not found.", 404);
-    }
+        const finalizeFromDoneEvent = (event: ParsedSseEvent<BridgeDoneEvent>) => {
+          const doneData = event.data ?? {};
+          const finalAssistantText = (doneData.message?.trim() || assistantText).trim();
+          const finalHermesSessionId = doneData.hermes_session_id?.trim();
+          const finalHermesProfileName = doneData.hermes_profile_name?.trim();
 
-    return NextResponse.json({
-      chat: chat.chat,
-      userMessage,
-      message
+          if (!finalAssistantText) {
+            throw new HermesClientError(
+              "Hermes stream completed without assistant text.",
+              502
+            );
+          }
+
+          if (!finalHermesSessionId) {
+            throw new HermesClientError(
+              "Hermes stream completed without a Hermes session id.",
+              502
+            );
+          }
+
+          if (!finalHermesProfileName) {
+            throw new HermesClientError(
+              "Hermes stream completed without a Hermes profile name.",
+              502
+            );
+          }
+
+          setUserHermesProfileName(user.id, finalHermesProfileName);
+          setChatHermesSessionId(user.id, chatId, finalHermesSessionId);
+
+          const message = appendMessage(user.id, chatId, {
+            role: "assistant",
+            content: finalAssistantText
+          });
+          const chat = getChat(user.id, chatId);
+
+          if (!chat) {
+            throw new ChatStoreError("Chat not found.", 404);
+          }
+
+          sendEvent("done", {
+            chat: chat.chat,
+            message,
+            userMessage
+          });
+          completed = true;
+          controller.close();
+        };
+
+        try {
+          if (!reader) {
+            throw new HermesClientError(
+              "Hermes bridge stream returned no response body.",
+              502
+            );
+          }
+
+          while (true) {
+            const { done, value } = await reader.read();
+
+            if (done) {
+              break;
+            }
+
+            const chunk = textDecoder.decode(value, { stream: true });
+            const events = parser.push(chunk);
+
+            for (const event of events) {
+              if (event.event === "delta") {
+                const deltaData = event.data as BridgeDeltaEvent | null;
+                const deltaText = deltaData?.text ?? "";
+
+                if (!deltaText) {
+                  continue;
+                }
+
+                assistantText += deltaText;
+                sendEvent("delta", {
+                  text: deltaText,
+                  snapshot: assistantText
+                });
+                continue;
+              }
+
+              if (event.event === "done") {
+                finalizeFromDoneEvent(event as ParsedSseEvent<BridgeDoneEvent>);
+                return;
+              }
+
+              if (event.event === "error") {
+                const errorData = event.data as BridgeErrorEvent | null;
+                throw new HermesClientError(
+                  errorData?.error || "Hermes bridge stream failed.",
+                  502
+                );
+              }
+            }
+          }
+
+          if (!completed) {
+            throw new HermesClientError(
+              "Hermes bridge stream ended before a final event was received.",
+              502
+            );
+          }
+        } catch (error) {
+          console.error("[hermes-chat stream] route stream failure", error);
+          sendEvent("error", {
+            error:
+              error instanceof Error
+                ? error.message
+                : "Unexpected server error while streaming Hermes."
+          });
+          controller.close();
+        } finally {
+          await reader?.cancel().catch(() => undefined);
+        }
+      }
+    });
+
+    return new Response(stream, {
+      status: 200,
+      headers: streamHeaders()
     });
   } catch (error) {
-    if (error instanceof AuthError) {
-      return NextResponse.json(
-        { error: error.message },
-        { status: error.status }
-      );
-    }
-
-    if (error instanceof SyntaxError) {
-      return NextResponse.json(
-        { error: "Request body must be valid JSON." },
-        { status: 400 }
-      );
-    }
-
-    if (error instanceof HermesClientError) {
-      return NextResponse.json(
-        { error: error.message },
-        { status: error.status }
-      );
-    }
-
-    if (error instanceof ChatStoreError) {
-      return NextResponse.json(
-        { error: error.message },
-        { status: error.status }
-      );
-    }
-
-    return NextResponse.json(
-      { error: "Unexpected server error while requesting Hermes." },
-      { status: 500 }
-    );
+    return errorJson(error);
   }
 }

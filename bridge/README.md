@@ -7,8 +7,9 @@ and Hermes CLI execution.
 
 - `GET /health`
 - `POST /v1/chat`
+- `POST /v1/chat/stream`
 
-`POST /v1/chat` accepts JSON with:
+Both chat endpoints accept JSON with:
 
 - `app_user_id`
 - `app_user_email`
@@ -17,11 +18,18 @@ and Hermes CLI execution.
 - optional `hermes_session_id`
 - optional `history`
 
-It returns JSON with:
+`POST /v1/chat` returns JSON with:
 
 - `message`
 - `hermes_session_id`
 - `hermes_profile_name`
+
+`POST /v1/chat/stream` returns `text/event-stream` with:
+
+- `delta` events containing `{ "text": "..." }`
+- one terminal `done` event containing the full message plus
+  `hermes_session_id` and `hermes_profile_name`
+- `error` events when the worker fails before completion
 
 ## Behavior
 
@@ -34,10 +42,14 @@ It returns JSON with:
 - `HERMES_BRIDGE_BASELINE_PROFILE` can override the baseline profile name.
 - Writes a profile-local `honcho.json` with `{"enabled": false}` and patches
   `config.yaml` so bridge-managed profiles do not inherit global Honcho context.
-- Runs one Hermes subprocess per request with `hermes -p <profile> chat -Q -q`.
+- Runs a fresh profile-scoped Python worker per request so `HERMES_HOME` is set
+  before Hermes modules import.
+- The worker restores existing Hermes session history from Hermes `state.db`, or
+  consumes app-provided bootstrap history for older chats that predate stored
+  Hermes session IDs.
 - Serializes requests per existing Hermes session, or per `(profile, chat)` before a
   session exists, so overlapping sends do not fork session state.
-- Resumes existing Hermes sessions with `--resume`.
+- Streams structured worker events through SSE without scraping decorated TTY output.
 
 ## Local Usage
 

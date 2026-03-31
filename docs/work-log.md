@@ -77,3 +77,22 @@ Hermes profile bridge migration:
 - Documented bridge setup, bridge env vars, and the new Phase 1 boundary in
   `.env.example`, `README.md`, `docs/current-status.md`, and
   `bridge/README.md`.
+
+SSE streaming slice:
+
+- Added `lib/sse.ts` plus tests so both the browser and the server can parse and
+  emit `text/event-stream` frames consistently.
+- Added `bridge/hermes_stream_worker.py`, a profile-scoped worker subprocess that
+  sets `HERMES_HOME` before importing Hermes modules, restores Hermes session
+  history from Hermes `state.db`, and emits structured JSON line events.
+- Reworked `bridge/hermes_bridge.py` so `/v1/chat` and `/v1/chat/stream` both
+  use the worker protocol instead of scraping decorated CLI output.
+- Added a streaming path to `app/api/chat/route.ts` that persists the user
+  message first, proxies bridge SSE deltas, and only persists the assistant
+  message once the stream completes successfully.
+- Updated `app/page.tsx` so the chat UI renders an optimistic assistant shell and
+  fills it incrementally as SSE deltas arrive.
+- Added Vitest and Python bridge tests, then verified `npm test`, `npm run lint`,
+  and `npm run build` all pass.
+- Manually validated the bridge streaming endpoint with a direct `curl -N`
+  request against a local bridge instance on port `8645`.
