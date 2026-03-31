@@ -8,10 +8,11 @@ The long-term target is a true Hermes gateway web platform, not a thin demo clie
 
 ## Phase 1 Decision
 
-Phase 1 starts with app foundation, repo discipline, and written decisions only. No application scaffolding has been added yet.
+Phase 1 remains intentionally narrow. The repo now includes a minimal Next.js + TypeScript foundation, but it still stops well short of product features or infrastructure.
 
 ## Current Boundary
 
-- Repo exists
-- Direction is documented
-- Implementation is intentionally deferred to the next step
+- Repo exists and direction is documented
+- App Router scaffold exists with `app/layout.tsx`, `app/page.tsx`, and `app/globals.css`
+- Core config files exist for Next.js, TypeScript, and ESLint
+- No auth, database, uploads, or Hermes integration have been added

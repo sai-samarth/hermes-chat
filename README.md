@@ -4,24 +4,38 @@ Minimal foundation for a Hermes-powered chat application.
 
 ## Purpose
 
-This repository starts as a disciplined Phase 1 baseline for a future Hermes gateway web platform. The immediate goal is to capture direction, scope, and next steps before scaffolding application code.
+This repository is a disciplined Phase 1 baseline for a future Hermes gateway web platform. The current step adds only a very small Next.js + TypeScript application shell so later features can be introduced deliberately.
 
 ## Phase 1 Scope
 
-- Create only the repo foundation and decision records.
-- Avoid premature app, database, auth, or deployment scaffolding.
-- Keep the next implementation step small and intentional.
+- Keep the app foundation intentionally small.
+- Ship a single App Router landing page and the minimum TypeScript and linting setup.
+- Avoid auth, database work, uploads, Hermes integration, and extra routes for now.
 
-## Stack Recommendation Summary
+## Current Foundation
 
-- Web app: Next.js with TypeScript
-- Runtime: Node.js
-- Persistence: Postgres
-- Development approach: local-first, minimal dependencies, add infrastructure only when needed
+- Next.js App Router
+- React
+- TypeScript
+- ESLint with Next.js config
 
-## Immediate Next Steps
+## Local Commands
 
-1. Initialize the app foundation deliberately instead of using heavy default scaffolding.
-2. Define environment variable conventions and local development workflow.
-3. Choose the first persistence path for chat/session data in Postgres.
-4. Establish the initial Hermes gateway boundary inside the web platform.
+1. `npm install`
+2. `npm run dev`
+3. `npm run lint`
+4. `npm run build`
+
+## What Exists Today
+
+- `app/layout.tsx`, `app/page.tsx`, and `app/globals.css`
+- Minimal Next.js configuration and TypeScript setup
+- A landing page that explicitly marks this as the Phase 1 foundation for Hermes Chat
+
+## Not Included Yet
+
+- Authentication
+- Database or persistence
+- File uploads
+- Hermes integration
+- Additional application routes
