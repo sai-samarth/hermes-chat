@@ -4,8 +4,8 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Hermes Chat | Phase 1 Foundation",
-  description: "Minimal Next.js foundation for Hermes Chat Phase 1."
+  title: "Hermes Chat | Static Phase 1 Preview",
+  description: "Static frontend app-shell preview for Hermes Chat Phase 1."
 };
 
 type RootLayoutProps = Readonly<{

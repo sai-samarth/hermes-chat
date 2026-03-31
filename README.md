@@ -4,13 +4,13 @@ Minimal foundation for a Hermes-powered chat application.
 
 ## Purpose
 
-This repository is a disciplined Phase 1 baseline for a future Hermes gateway web platform. The current step adds only a very small Next.js + TypeScript application shell so later features can be introduced deliberately.
+This repository is a disciplined Phase 1 baseline for a future Hermes gateway web platform. The current step keeps the repo frontend-only and replaces the initial landing page with a static chat app-shell preview for visual review.
 
 ## Phase 1 Scope
 
 - Keep the app foundation intentionally small.
-- Ship a single App Router landing page and the minimum TypeScript and linting setup.
-- Avoid auth, database work, uploads, Hermes integration, and extra routes for now.
+- Ship a single App Router route with a polished static chat interface preview.
+- Avoid interactivity, auth, database work, uploads, Hermes integration, and extra routes for now.
 
 ## Current Foundation
 
@@ -18,6 +18,7 @@ This repository is a disciplined Phase 1 baseline for a future Hermes gateway we
 - React
 - TypeScript
 - ESLint with Next.js config
+- Static chat-style app shell preview
 
 ## Local Commands
 
@@ -30,10 +31,12 @@ This repository is a disciplined Phase 1 baseline for a future Hermes gateway we
 
 - `app/layout.tsx`, `app/page.tsx`, and `app/globals.css`
 - Minimal Next.js configuration and TypeScript setup
-- A landing page that explicitly marks this as the Phase 1 foundation for Hermes Chat
+- A single-route static preview with a sidebar, header, mocked conversation, and composer area
+- Clear labels throughout the UI that this is a Phase 1 visual preview only
 
 ## Not Included Yet
 
+- Interactive chat behavior
 - Authentication
 - Database or persistence
 - File uploads
