@@ -10,13 +10,13 @@ export async function POST() {
     await destroyCurrentSession();
 
     const response = NextResponse.json({ ok: true });
-    return clearSessionCookie(response);
+    return await clearSessionCookie(response);
   } catch {
     const response = NextResponse.json(
       { error: "Unexpected server error while logging out." },
       { status: 500 }
     );
 
-    return clearSessionCookie(response);
+    return await clearSessionCookie(response);
   }
 }

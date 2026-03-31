@@ -34,7 +34,7 @@ export async function POST(request: Request) {
       { status: 201 }
     );
 
-    return attachSessionCookie(response, createUserSession(user.id));
+    return await attachSessionCookie(response, createUserSession(user.id));
   } catch (error) {
     if (error instanceof SyntaxError) {
       return NextResponse.json(

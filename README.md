@@ -42,10 +42,11 @@ This repository is a disciplined Phase 1 baseline for a future Hermes gateway we
 5. Optionally set `SQLITE_DB_PATH` in `hermes-chat/.env.local` if you do not want the default `./data/hermes-chat.sqlite`
    Relative paths resolve from the project root and parent directories are created automatically
 6. Optionally set `AUTH_SESSION_TTL_DAYS` if you want local sessions to expire sooner or later than the default 30 days
-7. Start the Hermes API server
-8. If you changed the `hermes-agent` environment, restart or reload the Hermes gateway before testing the chat app, or message sends will keep failing against stale gateway state
-9. Run `npm run dev`
-10. Open the app, register a local account, and then create chats inside that authenticated workspace
+7. Local auth cookies stay usable on plain `http://localhost` by default. Set `AUTH_COOKIE_SECURE=true` only when you want to force `Secure` session cookies, such as behind HTTPS locally or in a custom deployment
+8. Start the Hermes API server
+9. If you changed the `hermes-agent` environment, restart or reload the Hermes gateway before testing the chat app, or message sends will keep failing against stale gateway state
+10. Run `npm run dev`
+11. Open the app, register a local account, and then create chats inside that authenticated workspace
 
 This slice stores users, sessions, chats, and messages in a local SQLite file while still using the Hermes OpenAI-compatible API server as the temporary model boundary. Existing pre-auth chats without owners are intentionally left unreachable after the migration; new chats are always attached to the authenticated user who created them.
 
@@ -67,7 +68,7 @@ This slice stores users, sessions, chats, and messages in a local SQLite file wh
 - A server-side Hermes client that calls the Hermes API server through environment variables
 - SQLite-backed users, sessions, chats, and messages that survive page refresh
 - Per-user chat ownership so authenticated users only see their own chats and messages
-- Secure password hashing and HttpOnly cookie sessions managed by the Next.js backend
+- Secure password hashing and HttpOnly cookie sessions managed by the Next.js backend, with `Secure` enabled automatically on HTTPS requests or via `AUTH_COOKIE_SECURE=true`
 - Clear labels indicating that this is a temporary API-server-backed slice, not the final gateway-native model
 
 ## Not Included Yet

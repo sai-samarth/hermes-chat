@@ -29,7 +29,7 @@ export async function POST(request: Request) {
     );
     const response = NextResponse.json({ user });
 
-    return attachSessionCookie(response, createUserSession(user.id));
+    return await attachSessionCookie(response, createUserSession(user.id));
   } catch (error) {
     if (error instanceof SyntaxError) {
       return NextResponse.json(

@@ -9,7 +9,7 @@ import {
 } from "node:crypto";
 import { promisify } from "node:util";
 
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { getDb } from "@/lib/db";
@@ -20,6 +20,7 @@ const PASSWORD_SALT_BYTES = 16;
 const SESSION_COOKIE_NAME = "hermes_session";
 const SESSION_TOKEN_BYTES = 32;
 const DEFAULT_SESSION_TTL_DAYS = 30;
+const LOCAL_SESSION_COOKIE_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
 const MAX_EMAIL_LENGTH = 320;
 const MAX_PASSWORD_LENGTH = 200;
 const MIN_PASSWORD_LENGTH = 8;
@@ -131,6 +132,82 @@ function parseSessionTtlDays() {
   }
 
   return parsed;
+}
+
+function parseBooleanEnv(value: string | undefined) {
+  const normalized = value?.trim().toLowerCase();
+
+  if (!normalized) {
+    return null;
+  }
+
+  if (["1", "true", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+
+  if (["0", "false", "no", "off"].includes(normalized)) {
+    return false;
+  }
+
+  return null;
+}
+
+function parseHostname(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const trimmed = value.trim().toLowerCase();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  if (trimmed.startsWith("[")) {
+    const closingBracketIndex = trimmed.indexOf("]");
+    return closingBracketIndex === -1
+      ? trimmed.slice(1)
+      : trimmed.slice(1, closingBracketIndex);
+  }
+
+  return trimmed.split(":", 1)[0] ?? null;
+}
+
+async function shouldUseSecureSessionCookies() {
+  const envOverride = parseBooleanEnv(process.env.AUTH_COOKIE_SECURE);
+
+  if (envOverride !== null) {
+    return envOverride;
+  }
+
+  const headerStore = await headers();
+  const forwardedProto = headerStore
+    .get("x-forwarded-proto")
+    ?.split(",", 1)[0]
+    ?.trim()
+    .toLowerCase();
+
+  if (forwardedProto) {
+    return forwardedProto === "https";
+  }
+
+  const origin = headerStore.get("origin");
+
+  if (origin) {
+    try {
+      return new URL(origin).protocol === "https:";
+    } catch {
+      // Fall through to host-based detection when Origin is malformed.
+    }
+  }
+
+  const hostname = parseHostname(headerStore.get("host"));
+
+  if (hostname && LOCAL_SESSION_COOKIE_HOSTS.has(hostname)) {
+    return false;
+  }
+
+  return process.env.NODE_ENV === "production";
 }
 
 function cleanupExpiredSessions() {
@@ -324,7 +401,7 @@ export async function destroyCurrentSession() {
   );
 }
 
-function buildSessionCookieOptions(expiresAt: string) {
+async function buildSessionCookieOptions(expiresAt: string) {
   return {
     name: SESSION_COOKIE_NAME,
     value: "",
@@ -332,25 +409,31 @@ function buildSessionCookieOptions(expiresAt: string) {
     httpOnly: true,
     path: "/",
     sameSite: "lax" as const,
-    secure: process.env.NODE_ENV === "production"
+    secure: await shouldUseSecureSessionCookies()
   };
 }
 
-export function attachSessionCookie(
+export async function attachSessionCookie(
   response: NextResponse,
   session: CreatedSession
 ) {
+  const cookieOptions = await buildSessionCookieOptions(session.expiresAt);
+
   response.cookies.set({
-    ...buildSessionCookieOptions(session.expiresAt),
+    ...cookieOptions,
     value: session.token
   });
 
   return response;
 }
 
-export function clearSessionCookie(response: NextResponse) {
+export async function clearSessionCookie(response: NextResponse) {
+  const cookieOptions = await buildSessionCookieOptions(
+    new Date(0).toISOString()
+  );
+
   response.cookies.set({
-    ...buildSessionCookieOptions(new Date(0).toISOString()),
+    ...cookieOptions,
     expires: new Date(0)
   });
 
