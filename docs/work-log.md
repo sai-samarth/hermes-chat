@@ -21,3 +21,11 @@ Static chat app-shell preview:
 - Added a left sidebar, top header, mocked history list, mocked messages, and a bottom composer shell.
 - Updated the global styling to give the preview a responsive modern chat-product feel.
 - Kept the work frontend-only with clear labels that Phase 1 is still static and non-interactive.
+
+First backend vertical slice:
+
+- Added `lib/hermes.ts` as a server-side adapter for the Hermes OpenAI-compatible API server.
+- Added `app/api/chat/route.ts` to validate message lists and return a basic assistant reply payload.
+- Converted the single-route UI into a working local-state chat flow with submit, loading, and transcript updates.
+- Added `.env.example` and updated docs to describe the temporary Hermes API server boundary and setup.
+- Kept auth, persistence, attachments, streaming, and the final gateway-native session model out of scope.

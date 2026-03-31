@@ -6,7 +6,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Hermes Chat | Support Workspace",
   description:
-    "Static single-route support workspace shell for Hermes Chat, refined for final frontend review."
+    "Basic Hermes Chat workspace slice with a temporary Hermes API server backend boundary."
 };
 
 type RootLayoutProps = Readonly<{

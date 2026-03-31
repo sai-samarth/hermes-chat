@@ -313,6 +313,7 @@ code {
   gap: 1rem;
   padding: 1.5rem 2rem 1.75rem;
   background: var(--canvas);
+  overflow-y: auto;
 }
 
 .timeline-mark {
@@ -351,25 +352,31 @@ code {
   line-height: 1.68;
 }
 
-.message p + p {
-  margin-top: 0.72rem;
+.message-copy {
+  white-space: pre-wrap;
+}
+
+.message-pending {
+  border-style: dashed;
+  background: #fbfcfd;
 }
 
 .composer-shell {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 1rem;
-  align-items: end;
   padding: 1.25rem 2rem 1.75rem;
   border-top: 1px solid var(--border);
   background: var(--surface);
 }
 
+.composer-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1rem;
+  align-items: end;
+}
+
 .composer-field {
-  min-height: 128px;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
   gap: 1rem;
   padding: 1rem 1.1rem;
   border: 1px solid var(--border);
@@ -377,12 +384,54 @@ code {
   background: var(--surface);
 }
 
-.composer-placeholder {
+.composer-input {
+  width: 100%;
+  min-height: 7.5rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
   font-size: 1rem;
+  line-height: 1.65;
+  resize: vertical;
+}
+
+.composer-input::placeholder {
+  color: var(--muted);
+}
+
+.composer-input:focus {
+  outline: none;
+}
+
+.composer-input:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
 }
 
 .composer-copy {
   font-size: 0.92rem;
+}
+
+.composer-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.7rem;
+}
+
+.composer-status {
+  max-width: 14rem;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.5;
+  text-align: right;
+}
+
+.composer-status-error {
+  color: #9f2a2a;
 }
 
 .composer-button {
@@ -395,8 +444,19 @@ code {
   color: #ffffff;
   font: inherit;
   font-weight: 600;
+  cursor: pointer;
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
+}
+
+.composer-button:disabled {
   opacity: 0.32;
   cursor: not-allowed;
+}
+
+.composer-button:not(:disabled):hover {
+  transform: translateY(-1px);
 }
 
 @media (max-width: 1180px) {
@@ -452,7 +512,24 @@ code {
   }
 
   .composer-shell {
+    padding-bottom: 1.35rem;
+  }
+
+  .composer-form {
     grid-template-columns: 1fr;
+  }
+
+  .composer-actions {
+    align-items: stretch;
+  }
+
+  .composer-status {
+    max-width: none;
+    text-align: left;
+  }
+
+  .composer-button {
+    width: 100%;
   }
 
   .message {
@@ -496,9 +573,5 @@ code {
   .composer-shell {
     padding-top: 1rem;
     padding-bottom: 1.1rem;
-  }
-
-  .composer-field {
-    min-height: 116px;
   }
 }
