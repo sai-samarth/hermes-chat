@@ -3,9 +3,11 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
-  type FormEvent
+  type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent
 } from "react";
 
 import type {
@@ -19,6 +21,14 @@ import { createSseParser, type ParsedSseEvent } from "@/lib/sse";
 const DEFAULT_CHAT_TITLE = "New chat";
 const MAX_CHAT_TITLE_LENGTH = 80;
 const MAX_PREVIEW_LENGTH = 120;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const suggestionPrompts = [
+  "Explain a concept clearly with examples.",
+  "Help me write something sharper.",
+  "Brainstorm ideas from a rough starting point.",
+  "Turn a messy thought into a plan."
+] as const;
 
 const timeFormatter = new Intl.DateTimeFormat(undefined, {
   hour: "2-digit",
@@ -33,6 +43,11 @@ const monthDayFormatter = new Intl.DateTimeFormat(undefined, {
 const fullDateFormatter = new Intl.DateTimeFormat(undefined, {
   month: "short",
   day: "numeric",
+  year: "numeric"
+});
+
+const monthYearFormatter = new Intl.DateTimeFormat(undefined, {
+  month: "long",
   year: "numeric"
 });
 
@@ -52,6 +67,7 @@ type SessionResponse = {
 };
 
 type AuthResponse = {
+  error?: string;
   user?: SessionUser;
 };
 
@@ -77,6 +93,12 @@ type StreamErrorEvent = {
 };
 
 type AuthMode = "login" | "register";
+
+type ChatGroup = {
+  key: string;
+  label: string;
+  chats: ChatSummary[];
+};
 
 async function readJson<T>(response: Response): Promise<T | null> {
   return (await response.json().catch(() => null)) as T | null;
@@ -185,6 +207,57 @@ function formatChatUpdatedAt(value: string) {
   return fullDateFormatter.format(updatedAt);
 }
 
+function startOfDay(value: Date) {
+  return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+}
+
+function getChatGroupLabel(value: string) {
+  const updatedAt = new Date(value);
+  const today = startOfDay(new Date());
+  const updatedDay = startOfDay(updatedAt);
+  const dayDelta = Math.round((today.getTime() - updatedDay.getTime()) / DAY_MS);
+
+  if (dayDelta <= 0) {
+    return { key: "today", label: "Today" };
+  }
+
+  if (dayDelta === 1) {
+    return { key: "yesterday", label: "Yesterday" };
+  }
+
+  if (dayDelta < 7) {
+    return { key: "previous-7-days", label: "Previous 7 days" };
+  }
+
+  const monthLabel = monthYearFormatter.format(updatedAt);
+  return {
+    key: `month-${updatedAt.getFullYear()}-${updatedAt.getMonth() + 1}`,
+    label: monthLabel
+  };
+}
+
+function groupChats(chats: ChatSummary[]): ChatGroup[] {
+  const groups: ChatGroup[] = [];
+
+  for (const chat of chats) {
+    const bucket = getChatGroupLabel(chat.updatedAt);
+    const existingGroup = groups.find((group) => group.key === bucket.key);
+
+    if (existingGroup) {
+      existingGroup.chats.push(chat);
+      continue;
+    }
+
+    groups.push({
+      key: bucket.key,
+      label: bucket.label,
+      chats: [chat]
+    });
+  }
+
+  return groups;
+}
+
 function getChatBlurb(chat: ChatSummary) {
   return chat.lastMessagePreview ?? "Start the conversation with Hermes.";
 }
@@ -223,7 +296,10 @@ export default function Home() {
   const [isSending, setIsSending] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [composerError, setComposerError] = useState<string | null>(null);
+
   const transcriptRef = useRef<HTMLDivElement>(null);
+  const composerFormRef = useRef<HTMLFormElement>(null);
+  const composerInputRef = useRef<HTMLTextAreaElement>(null);
 
   const isAuthenticated =
     sessionState === "authenticated" && sessionUser !== null;
@@ -237,7 +313,18 @@ export default function Home() {
     isSending ||
     isLoggingOut;
   const composerBusy = sidebarBusy || !selectedChatId;
-  const authBusy = authPending || sessionState === "loading";
+  const authBusy = authPending || isLoggingOut || sessionState === "loading";
+  const groupedChats = useMemo(() => groupChats(chats), [chats]);
+
+  const composerStatus = composerError
+    ? composerError
+    : isSending
+      ? "Hermes is responding"
+      : isLoadingChat
+        ? "Loading chat"
+        : !selectedChatId
+          ? "Start a chat"
+          : "Ready";
 
   const resetWorkspaceState = useCallback(() => {
     setChats([]);
@@ -512,7 +599,7 @@ export default function Home() {
     }
   }
 
-  async function handleCreateChat() {
+  async function handleCreateChat(prefillDraft = "") {
     if (sidebarBusy) {
       return;
     }
@@ -547,7 +634,10 @@ export default function Home() {
       setChats((currentChats) => upsertChat(currentChats, payload.chat));
       setSelectedChatId(payload.chat.id);
       setMessages(payload.messages ?? []);
-      setDraft("");
+      setDraft(prefillDraft);
+      requestAnimationFrame(() => {
+        composerInputRef.current?.focus();
+      });
     } catch (error) {
       setLoadError(
         error instanceof Error ? error.message : "Could not create a chat."
@@ -717,131 +807,154 @@ export default function Home() {
     }
   }
 
+  function handleComposerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key !== "Enter" || event.shiftKey) {
+      return;
+    }
+
+    event.preventDefault();
+    composerFormRef.current?.requestSubmit();
+  }
+
+  async function handleSuggestionSelect(prompt: string) {
+    setComposerError(null);
+
+    if (!selectedChatId) {
+      await handleCreateChat(prompt);
+      return;
+    }
+
+    setDraft(prompt);
+    composerInputRef.current?.focus();
+  }
+
   if (!isAuthenticated || !sessionUser) {
     return (
       <main className="preview-shell">
         <section className="auth-shell">
-          <div className="auth-hero">
-            <div className="sidebar-top auth-brand">
-              <div className="brand-mark">H</div>
+          <div className="auth-frame">
+            <div className="auth-hero">
+              <div className="sidebar-top auth-brand">
+                <div className="brand-mark">H</div>
 
-              <div>
-                <p className="eyebrow">Hermes Chat</p>
-                <p className="sidebar-title">Private by default</p>
+                <div>
+                  <p className="eyebrow">Hermes Chat</p>
+                  <p className="sidebar-title">Private by default</p>
+                </div>
+              </div>
+
+              <div className="auth-copy-stack">
+                <h1 className="auth-title">A quieter place to think with Hermes.</h1>
+                <p className="auth-copy">
+                  Your chats stay personal, persistent, and easy to return to.
+                  Sign in to continue your workspace.
+                </p>
+              </div>
+
+              <div className="auth-points" aria-label="Product benefits">
+                <p>Private conversations on this machine</p>
+                <p>One chat thread that stays in context</p>
+                <p>Fast, focused workspace without extra noise</p>
               </div>
             </div>
 
-            <div className="auth-copy-stack">
-              <h1 className="auth-title">A quieter place to think with Hermes.</h1>
-              <p className="auth-copy">
-                Your chats stay personal, persistent, and easy to return to.
-                Sign in to continue your workspace.
-              </p>
-            </div>
-
-            <div className="auth-points" aria-label="Product benefits">
-              <p>Private conversations on this machine</p>
-              <p>One chat thread that stays in context</p>
-              <p>Fast, focused workspace without extra noise</p>
-            </div>
-          </div>
-
-          <section className="auth-panel" aria-label="Authentication">
-            <div className="auth-toggle" role="tablist" aria-label="Auth mode">
-              <button
-                type="button"
-                className={`auth-toggle-button${authMode === "login" ? " auth-toggle-button-active" : ""}`}
-                onClick={() => {
-                  setAuthMode("login");
-                  setAuthError(null);
-                }}
-                disabled={authBusy}
-              >
-                Log in
-              </button>
-              <button
-                type="button"
-                className={`auth-toggle-button${authMode === "register" ? " auth-toggle-button-active" : ""}`}
-                onClick={() => {
-                  setAuthMode("register");
-                  setAuthError(null);
-                }}
-                disabled={authBusy}
-              >
-                Register
-              </button>
-            </div>
-
-            <div className="auth-panel-copy">
-              <p className="eyebrow">Access</p>
-              <h2>
-                {authMode === "login"
-                  ? "Return to your workspace"
-                  : "Create your workspace"}
-              </h2>
-              <p>
-                {authMode === "login"
-                  ? "Pick up where you left off."
-                  : "Set up a personal space for ongoing conversations with Hermes."}
-              </p>
-            </div>
-
-            <form className="auth-form" onSubmit={handleAuthSubmit}>
-              <label className="auth-field">
-                <span className="composer-label">Email</span>
-                <input
-                  className="auth-input"
-                  type="email"
-                  name="email"
-                  autoComplete="email"
-                  value={authEmail}
-                  onChange={(event) => setAuthEmail(event.target.value)}
-                  placeholder="name@company.com"
+            <section className="auth-panel" aria-label="Authentication">
+              <div className="auth-toggle" role="tablist" aria-label="Auth mode">
+                <button
+                  type="button"
+                  className={`auth-toggle-button${authMode === "login" ? " auth-toggle-button-active" : ""}`}
+                  onClick={() => {
+                    setAuthMode("login");
+                    setAuthError(null);
+                  }}
                   disabled={authBusy}
-                />
-              </label>
-
-              <label className="auth-field">
-                <span className="composer-label">Password</span>
-                <input
-                  className="auth-input"
-                  type="password"
-                  name="password"
-                  autoComplete={
-                    authMode === "login" ? "current-password" : "new-password"
-                  }
-                  value={authPassword}
-                  onChange={(event) => setAuthPassword(event.target.value)}
-                  placeholder="At least 8 characters"
+                >
+                  Log in
+                </button>
+                <button
+                  type="button"
+                  className={`auth-toggle-button${authMode === "register" ? " auth-toggle-button-active" : ""}`}
+                  onClick={() => {
+                    setAuthMode("register");
+                    setAuthError(null);
+                  }}
                   disabled={authBusy}
-                />
-              </label>
+                >
+                  Register
+                </button>
+              </div>
 
-              {authError ? (
-                <p className="auth-status auth-status-error" role="alert">
-                  {authError}
+              <div className="auth-panel-copy">
+                <p className="eyebrow">Access</p>
+                <h2>
+                  {authMode === "login"
+                    ? "Return to your workspace"
+                    : "Create your workspace"}
+                </h2>
+                <p>
+                  {authMode === "login"
+                    ? "Pick up where you left off."
+                    : "Set up a personal space for ongoing conversations with Hermes."}
                 </p>
-              ) : (
-                <p className="auth-status" aria-live="polite">
-                  {sessionState === "loading"
-                    ? "Getting things ready..."
+              </div>
+
+              <form className="auth-form" onSubmit={handleAuthSubmit}>
+                <label className="auth-field">
+                  <span className="composer-label">Email</span>
+                  <input
+                    className="auth-input"
+                    type="email"
+                    name="email"
+                    autoComplete="email"
+                    value={authEmail}
+                    onChange={(event) => setAuthEmail(event.target.value)}
+                    placeholder="name@company.com"
+                    disabled={authBusy}
+                  />
+                </label>
+
+                <label className="auth-field">
+                  <span className="composer-label">Password</span>
+                  <input
+                    className="auth-input"
+                    type="password"
+                    name="password"
+                    autoComplete={
+                      authMode === "login" ? "current-password" : "new-password"
+                    }
+                    value={authPassword}
+                    onChange={(event) => setAuthPassword(event.target.value)}
+                    placeholder="At least 8 characters"
+                    disabled={authBusy}
+                  />
+                </label>
+
+                {authError ? (
+                  <p className="auth-status auth-status-error" role="alert">
+                    {authError}
+                  </p>
+                ) : (
+                  <p className="auth-status" aria-live="polite">
+                    {sessionState === "loading"
+                      ? "Getting things ready..."
+                      : authMode === "login"
+                        ? "Use the email and password for this workspace."
+                        : "Use at least 8 characters for your password."}
+                  </p>
+                )}
+
+                <button className="auth-submit" type="submit" disabled={authBusy}>
+                  {authPending
+                    ? authMode === "login"
+                      ? "Signing in..."
+                      : "Creating..."
                     : authMode === "login"
-                      ? "Use the email and password for this workspace."
-                      : "Use at least 8 characters for your password."}
-                </p>
-              )}
-
-              <button className="auth-submit" type="submit" disabled={authBusy}>
-                {authPending
-                  ? authMode === "login"
-                    ? "Signing in..."
-                    : "Creating..."
-                  : authMode === "login"
-                    ? "Log in"
-                    : "Create account"}
-              </button>
-            </form>
-          </section>
+                      ? "Log in"
+                      : "Create account"}
+                </button>
+              </form>
+            </section>
+          </div>
         </section>
       </main>
     );
@@ -851,7 +964,7 @@ export default function Home() {
     <main className="preview-shell">
       <div className="workspace-shell">
         <aside className="sidebar" aria-label="Workspace navigation">
-          <div className="sidebar-top">
+          <div className="sidebar-top sidebar-brand-block">
             <div className="brand-mark">H</div>
 
             <div>
@@ -877,42 +990,54 @@ export default function Home() {
               <button
                 type="button"
                 className="sidebar-action sidebar-action-primary"
-                onClick={handleCreateChat}
+                onClick={() => void handleCreateChat()}
                 disabled={sidebarBusy}
               >
-                {isCreatingChat ? "Creating..." : "New chat"}
+                {isCreatingChat ? "Creating..." : "+ New chat"}
               </button>
             </div>
 
-            <ul className="thread-list">
-              {chats.map((chat) => (
-                <li key={chat.id}>
-                  <button
-                    type="button"
-                    className={`thread-item${chat.id === selectedChatId ? " thread-item-active" : ""}`}
-                    onClick={() => void loadChat(chat.id)}
-                    disabled={sidebarBusy || chat.id === selectedChatId}
-                    aria-current={chat.id === selectedChatId ? "page" : undefined}
-                  >
-                    <div className="thread-row">
-                      <p className="thread-title">{chat.title}</p>
-                      <p className="thread-updated">
-                        {formatChatUpdatedAt(chat.updatedAt)}
-                      </p>
-                    </div>
+            <div className="thread-list" role="list">
+              {groupedChats.map((group) => (
+                <section key={group.key} className="thread-group" aria-label={group.label}>
+                  <p className="thread-group-label">{group.label}</p>
+                  <ul className="thread-group-list">
+                    {group.chats.map((chat) => (
+                      <li key={chat.id}>
+                        <button
+                          type="button"
+                          className={`thread-item${chat.id === selectedChatId ? " thread-item-active" : ""}`}
+                          onClick={() => void loadChat(chat.id)}
+                          disabled={sidebarBusy || chat.id === selectedChatId}
+                          aria-current={chat.id === selectedChatId ? "page" : undefined}
+                        >
+                          <div className="thread-row">
+                            <p className="thread-title">{chat.title}</p>
+                            <p className="thread-updated">
+                              {formatChatUpdatedAt(chat.updatedAt)}
+                            </p>
+                          </div>
 
-                    <p className="thread-blurb">{getChatBlurb(chat)}</p>
-                    <p className="thread-meta">{getChatMeta(chat)}</p>
-                  </button>
-                </li>
+                          <p className="thread-blurb">{getChatBlurb(chat)}</p>
+                          <p className="thread-meta">{getChatMeta(chat)}</p>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
               ))}
-            </ul>
+            </div>
           </section>
 
           <div className="sidebar-foot">
-            <div className="sidebar-account">
-              <p className="sidebar-note-title">Account</p>
-              <p className="sidebar-account-email">{sessionUser.email}</p>
+            <div className="sidebar-account-shell">
+              <div className="sidebar-account-avatar" aria-hidden="true">
+                {sessionUser.email.charAt(0).toUpperCase()}
+              </div>
+              <div className="sidebar-account">
+                <p className="sidebar-note-title">Account</p>
+                <p className="sidebar-account-email">{sessionUser.email}</p>
+              </div>
             </div>
 
             <button
@@ -928,27 +1053,29 @@ export default function Home() {
 
         <section className="chat-panel" aria-label="Chat workspace">
           <header className="chat-topbar">
-            <div className="chat-title-block">
-              <p className="eyebrow">Conversation</p>
+            <div className="chat-column chat-topbar-inner">
+              <div className="chat-title-block">
+                <p className="eyebrow">Conversation</p>
 
-              <div className="chat-heading-row">
-                <h1>
-                  {currentChat?.title ??
-                    (isBootstrapping
-                      ? "Loading chats"
-                      : chats.length === 0
-                        ? "Start a new chat"
-                        : "Choose a chat")}
-                </h1>
+                <div className="chat-heading-row">
+                  <h1>
+                    {currentChat?.title ??
+                      (isBootstrapping
+                        ? "Loading chats"
+                        : chats.length === 0
+                          ? "Start a new chat"
+                          : "Choose a chat")}
+                  </h1>
+                </div>
+
+                <p className="chat-summary">
+                  {currentChat
+                    ? "A persistent thread with Hermes."
+                    : chats.length === 0
+                      ? "Create a chat to begin, or use a starter below."
+                      : "Pick a conversation from the sidebar, or start a fresh one."}
+                </p>
               </div>
-
-              <p className="chat-summary">
-                {currentChat
-                  ? "A persistent thread with Hermes."
-                  : chats.length === 0
-                    ? "Create a chat to begin."
-                    : "Pick a conversation from the sidebar."}
-              </p>
             </div>
           </header>
 
@@ -957,116 +1084,157 @@ export default function Home() {
             className="message-list"
             aria-label="Conversation transcript"
           >
-            <p className="timeline-mark">
-              {isBootstrapping
-                ? "Loading"
-                : isLoadingChat
-                  ? "Opening chat"
-                  : currentChat
-                    ? "Live transcript"
-                    : "Conversation"}
-            </p>
-
-            {loadError ? (
-              <p className="timeline-status timeline-status-error" role="alert">
-                {loadError}
+            <div className="chat-column transcript-column">
+              <p className="timeline-mark">
+                {isBootstrapping
+                  ? "Loading"
+                  : isLoadingChat
+                    ? "Opening chat"
+                    : currentChat
+                      ? "Live transcript"
+                      : "Conversation"}
               </p>
-            ) : null}
 
-            {!loadError &&
-            !isBootstrapping &&
-            !isLoadingChat &&
-            messages.length === 0 ? (
-              <article className="message message-assistant message-empty">
-                <div className="message-meta">
-                  <span>Hermes</span>
-                  <span>Ready</span>
-                </div>
-                <p className="message-copy">
-                  {selectedChatId
-                    ? "Send the first message to begin the conversation."
-                    : "Create a chat to get started."}
+              {loadError ? (
+                <p className="timeline-status timeline-status-error" role="alert">
+                  {loadError}
                 </p>
-              </article>
-            ) : null}
+              ) : null}
 
-            {messages.map((message) => (
-              <article
-                key={message.id}
-                className={`message message-${message.role}`}
-              >
-                <div className="message-meta">
-                  <div className="message-identity">
-                    {message.role === "assistant" ? (
-                      <span className="message-avatar" aria-hidden="true">
-                        H
-                      </span>
-                    ) : null}
-                    <span>{getMessageAuthor(message.role)}</span>
+              {!loadError &&
+              !isBootstrapping &&
+              !isLoadingChat &&
+              messages.length === 0 ? (
+                <section className="empty-state" aria-label="Chat empty state">
+                  <div className="empty-state-mark">H</div>
+                  <h2>
+                    {selectedChatId
+                      ? "This thread is ready for a first message"
+                      : "A quieter place to think with Hermes"}
+                  </h2>
+                  <p>
+                    {selectedChatId
+                      ? "Send a question, paste a prompt, or pick a starter to get the conversation moving."
+                      : "Start a new thread, then use a starter below to drop a thought into the composer."}
+                  </p>
+
+                  <div className="suggestion-grid" role="list">
+                    {suggestionPrompts.map((prompt) => (
+                      <button
+                        key={prompt}
+                        type="button"
+                        className="suggestion-pill"
+                        onClick={() => void handleSuggestionSelect(prompt)}
+                        disabled={sidebarBusy}
+                      >
+                        {prompt}
+                      </button>
+                    ))}
                   </div>
-                  <span>{formatMessageTime(message.createdAt)}</span>
-                </div>
 
-                <div className="message-copy">
-                  {renderChatMarkdown(
-                    message.content ||
-                      (message.role === "assistant" && isSending
-                        ? "Thinking…"
-                        : "")
-                  )}
-                </div>
-              </article>
-            ))}
+                  {!selectedChatId ? (
+                    <button
+                      type="button"
+                      className="empty-state-action"
+                      onClick={() => void handleCreateChat()}
+                      disabled={sidebarBusy}
+                    >
+                      {isCreatingChat ? "Creating..." : "Start a new chat"}
+                    </button>
+                  ) : null}
+                </section>
+              ) : null}
 
+              {messages.map((message) => (
+                <article
+                  key={message.id}
+                  className={`message message-${message.role}`}
+                >
+                  <div className="message-meta">
+                    <div className="message-identity">
+                      {message.role === "assistant" ? (
+                        <span className="message-avatar" aria-hidden="true">
+                          H
+                        </span>
+                      ) : (
+                        <span className="message-avatar message-avatar-user" aria-hidden="true">
+                          Y
+                        </span>
+                      )}
+                      <span>{getMessageAuthor(message.role)}</span>
+                    </div>
+                    <span>{formatMessageTime(message.createdAt)}</span>
+                  </div>
+
+                  <div className="message-copy">
+                    {renderChatMarkdown(
+                      message.content ||
+                        (message.role === "assistant" && isSending
+                          ? "Thinking…"
+                          : "")
+                    )}
+                  </div>
+                </article>
+              ))}
+            </div>
           </div>
 
           <footer className="composer-shell" aria-label="Chat composer">
-            <form className="composer-form" onSubmit={handleSubmit}>
-              <div className="composer-field">
-                <label className="composer-label" htmlFor="chat-draft">
-                  Message Hermes
-                </label>
-                <textarea
-                  id="chat-draft"
-                  className="composer-input"
-                  name="chat-draft"
-                  value={draft}
-                  onChange={(event) => setDraft(event.target.value)}
-                  placeholder="Message Hermes"
-                  rows={4}
-                  disabled={composerBusy}
-                />
-                <p className="composer-copy">
-                  Keep it short, or paste a full prompt.
-                </p>
-              </div>
+            <div className="chat-column composer-column">
+              <form
+                ref={composerFormRef}
+                className="composer-form"
+                onSubmit={handleSubmit}
+              >
+                <div className="composer-card">
+                  <label className="composer-label" htmlFor="chat-draft">
+                    Message Hermes
+                  </label>
+                  <textarea
+                    ref={composerInputRef}
+                    id="chat-draft"
+                    className="composer-input"
+                    name="chat-draft"
+                    value={draft}
+                    onChange={(event) => setDraft(event.target.value)}
+                    onKeyDown={handleComposerKeyDown}
+                    placeholder="Message Hermes"
+                    rows={4}
+                    disabled={composerBusy}
+                  />
 
-              <div className="composer-actions">
-                {composerError ? (
-                  <p className="composer-status composer-status-error" role="alert">
-                    {composerError}
-                  </p>
-                ) : (
-                  <p className="composer-status" aria-live="polite">
-                    {isSending
-                      ? "Hermes is responding..."
-                      : isLoadingChat
-                        ? "Loading chat..."
-                        : !selectedChatId
-                          ? "Create a chat to begin."
-                          : "Ready."}
-                  </p>
-                )}
+                  <div className="composer-footer-row">
+                    <div className="composer-footnotes">
+                      <p className="composer-copy">
+                        Keep it short, or paste a full prompt.
+                      </p>
+                      <p className="composer-shortcut">
+                        Enter to send, Shift+Enter for newline
+                      </p>
+                    </div>
 
-                <button
-                  className="composer-button"
-                  type="submit"
-                  disabled={composerBusy || draft.trim().length === 0}
-                >
-                  {isSending ? "Sending..." : "Send"}
-                </button>
-              </div>
-            </form>
+                    <div className="composer-controls">
+                      <span
+                        className={`composer-badge${composerError ? " composer-badge-error" : ""}`}
+                        aria-live="polite"
+                        role={composerError ? "alert" : undefined}
+                      >
+                        {composerStatus}
+                      </span>
+
+                      <button
+                        className="composer-button"
+                        type="submit"
+                        disabled={composerBusy || draft.trim().length === 0}
+                        aria-label={isSending ? "Sending" : "Send message"}
+                      >
+                        <span aria-hidden="true">↑</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </form>
+            </div>
           </footer>
         </section>
       </div>

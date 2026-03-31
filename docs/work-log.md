@@ -127,3 +127,22 @@ UI polish pass from review feedback:
   message identity/timestamp presentation.
 - Kept the composer anchored to the bottom of the workspace shell for a more
   stable chat layout.
+
+Larger UI refresh planned from the Claude brief:
+
+- Saved the implementation plan to
+  `docs/plans/2026-03-31-hermes-ui-refresh.md`.
+- Added a centered conversation column so header, transcript, and composer all
+  align on the same vertical axis with visible wide-screen gutters.
+- Replaced the handwritten markdown formatter with `react-markdown` plus GFM
+  and `rehype-highlight` for richer assistant response rendering.
+- Rebuilt the composer into a single elevated card with inline send action,
+  status badge, helper copy, and Enter/Shift+Enter affordances.
+- Grouped sidebar history by recency buckets, switched snippets to one-line
+  truncation, added a separator under branding, and anchored the account block
+  more cleanly at the bottom.
+- Added a friendlier centered empty state with starter prompts that prefill the
+  composer and create a chat if needed.
+- Consolidated the signed-out screen into a single split-card auth layout.
+- Added dark scrollbars, stronger focus states, and broader hover polish.
+- Re-ran `npm run lint` and `npm run build` after the larger UI refresh.
