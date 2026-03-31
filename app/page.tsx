@@ -1,30 +1,34 @@
-const chatHistory = [
+const threads = [
   {
-    title: "Ops handoff notes",
-    detail: "Pinned mock thread"
+    title: "Customer escalation draft",
+    detail: "Selected review thread",
+    active: true
   },
   {
-    title: "Billing follow-up",
-    detail: "Yesterday"
+    title: "Bug triage summary",
+    detail: "Yesterday",
+    active: false
   },
   {
-    title: "Voice UX review",
-    detail: "Mar 29"
+    title: "Onboarding tone pass",
+    detail: "Mar 29",
+    active: false
   },
   {
-    title: "Launch checklist",
-    detail: "Mar 27"
+    title: "Billing transcript audit",
+    detail: "Mar 27",
+    active: false
   }
 ];
 
 const messages = [
   {
     role: "assistant",
-    author: "Hermes Preview",
+    author: "Hermes Shell",
     time: "09:14",
     lines: [
-      "This screen is a static Phase 1 app-shell preview for layout review only.",
-      "It is intentionally limited to visual structure: sidebar, header, mocked chat history, mocked messages, and a non-interactive composer."
+      "This route stays intentionally static so review stays focused on structure, spacing, and product tone.",
+      "Navigation, transcript, and composer are placeholders for a phase-1 shell review only."
     ]
   },
   {
@@ -32,16 +36,16 @@ const messages = [
     author: "Product Review",
     time: "09:16",
     lines: [
-      "Keep the UI modern and familiar, but do not introduce live chat behavior, auth, persistence, or API wiring yet."
+      "Make the main pane feel primary. Keep the sidebar quieter and stop relying on decorative labels to explain the phase."
     ]
   },
   {
     role: "assistant",
-    author: "Hermes Preview",
+    author: "Hermes Shell",
     time: "09:18",
     lines: [
-      "The shell stays on a single route at app/page.tsx and gives reviewers a concrete sense of spacing, hierarchy, and responsive behavior.",
-      "Everything here is mocked for Phase 1 feedback."
+      "The revised direction uses flatter surfaces, tighter radii, a cleaner sans-first type system, and a calmer neutral palette.",
+      "Preview labeling stays present, but only where it helps reviewers understand that nothing is wired yet."
     ]
   },
   {
@@ -49,127 +53,135 @@ const messages = [
     author: "Project Scope",
     time: "09:19",
     lines: [
-      "Next steps can wire the real experience later. For now, the repo should clearly communicate that this is a static preview build."
+      "Keep auth, persistence, streaming, and Hermes connectivity out of this step. The route should remain a static shell in app/page.tsx."
     ]
   }
 ];
 
 const outOfScope = [
-  "Auth and user accounts",
-  "Database and persistence",
+  "Interactive chat behavior",
+  "Authentication and accounts",
+  "Database or persistence",
   "Hermes API integration"
 ];
 
 export default function Home() {
   return (
     <main className="preview-shell">
-      <aside className="sidebar">
-        <div className="brand-block">
+      <aside className="sidebar" aria-label="Static navigation shell preview">
+        <div className="sidebar-top">
           <div className="brand-mark">H</div>
           <div>
-            <p className="section-label">Hermes Chat</p>
-            <h1>Static app shell preview</h1>
+            <p className="eyebrow">Hermes Chat</p>
+            <h1>App shell review</h1>
           </div>
         </div>
 
-        <section className="sidebar-card">
-          <p className="section-label">Phase 1 preview only</p>
-          <p className="sidebar-copy">
-            Frontend-only visual shell for review. No interactivity, state
-            management, auth, database work, or API calls are included.
-          </p>
-        </section>
+        <p className="sidebar-intro">
+          Static phase-1 workspace preview focused on layout, hierarchy, and
+          overall product tone.
+        </p>
 
-        <div className="ghost-action">New chat disabled in preview</div>
-
-        <section aria-labelledby="history-heading" className="sidebar-section">
-          <div className="sidebar-heading">
-            <p id="history-heading" className="section-label">
-              Mocked chat history
+        <section aria-labelledby="threads-heading" className="sidebar-section">
+          <div className="section-head">
+            <p id="threads-heading" className="section-label">
+              Preview threads
             </p>
-            <span className="tag">Visual only</span>
+            <span className="section-note">Mocked list</span>
           </div>
 
-          <ul className="history-list">
-            {chatHistory.map((item) => (
-              <li key={item.title} className="history-item">
-                <strong>{item.title}</strong>
-                <span>{item.detail}</span>
+          <ul className="thread-list">
+            {threads.map((thread) => (
+              <li
+                key={thread.title}
+                className={`thread-item${thread.active ? " thread-item-active" : ""}`}
+              >
+                <p className="thread-title">{thread.title}</p>
+                <p className="thread-detail">{thread.detail}</p>
               </li>
             ))}
           </ul>
         </section>
 
-        <section className="sidebar-card">
-          <p className="section-label">Deferred on purpose</p>
+        <section aria-labelledby="scope-heading" className="sidebar-section sidebar-foot">
+          <p id="scope-heading" className="section-label">
+            Deferred in phase 1
+          </p>
           <ul className="scope-list">
             {outOfScope.map((item) => (
               <li key={item}>{item}</li>
             ))}
           </ul>
+          <p className="sidebar-note">
+            Single route at <code>app/page.tsx</code>. Static shell only.
+          </p>
         </section>
       </aside>
 
-      <section className="chat-frame" aria-label="Static chat application shell">
-        <header className="chat-header">
-          <div>
-            <p className="section-label">Current view</p>
+      <section className="chat-panel" aria-label="Static chat application shell">
+        <header className="chat-topbar">
+          <div className="chat-title-block">
+            <p className="eyebrow">Static preview shell</p>
             <h2>Customer support workspace</h2>
-            <p className="header-copy">
-              A polished single-route shell meant for visual feedback before any
-              real product wiring begins.
+            <p className="chat-summary">
+              Cleaner app-shell direction for review: quieter navigation,
+              stronger conversation focus, and flatter surfaces throughout.
             </p>
           </div>
 
-          <div className="header-tags" aria-label="Preview status">
-            <span>Static preview</span>
-            <span>Single route</span>
-            <span>Phase 1</span>
+          <div className="chat-meta" aria-label="Preview context">
+            <p className="chat-meta-label">Phase 1 review</p>
+            <p className="chat-meta-copy">
+              Single route only.
+              <br />
+              No behavior wired.
+            </p>
           </div>
         </header>
 
-        <section className="conversation-card">
-          <div className="notice-banner">
-            <p className="section-label">Status</p>
-            <p>
-              This is a non-interactive Hermes Chat preview for structure,
-              hierarchy, and styling review only.
+        <div className="review-strip">
+          <p>
+            Static review shell: transcript, sidebar, and composer remain
+            non-interactive placeholders for layout feedback only.
+          </p>
+        </div>
+
+        <div className="message-list" aria-label="Mocked conversation">
+          <p className="transcript-label">Mock transcript for shell review</p>
+
+          {messages.map((message) => (
+            <article
+              key={`${message.role}-${message.time}`}
+              className={`message message-${message.role}`}
+            >
+              <div className="message-meta">
+                <span>{message.author}</span>
+                <span>{message.time}</span>
+              </div>
+
+              {message.lines.map((line) => (
+                <p key={line}>{line}</p>
+              ))}
+            </article>
+          ))}
+        </div>
+
+        <footer className="composer-shell" aria-label="Static composer preview">
+          <div className="composer-field">
+            <p className="composer-placeholder">Message Hermes Chat</p>
+            <p className="composer-copy">
+              Disabled in review. No state, streaming, auth, persistence, or
+              backend connectivity is included in this phase.
             </p>
           </div>
 
-          <div className="message-list" aria-label="Mocked conversation">
-            {messages.map((message) => (
-              <article
-                key={`${message.role}-${message.time}`}
-                className={`message message-${message.role}`}
-              >
-                <div className="message-meta">
-                  <span>{message.author}</span>
-                  <span>{message.time}</span>
-                </div>
-
-                {message.lines.map((line) => (
-                  <p key={line}>{line}</p>
-                ))}
-              </article>
-            ))}
+          <div className="composer-actions">
+            <span className="composer-status">Static composer</span>
+            <button className="composer-button" type="button" disabled>
+              Send
+            </button>
           </div>
-
-          <footer className="composer-shell" aria-label="Static composer preview">
-            <div>
-              <p className="composer-placeholder">Message Hermes Chat</p>
-              <p className="composer-copy">
-                Static Phase 1 preview. Composer actions, persistence, and
-                Hermes connectivity are intentionally not wired yet.
-              </p>
-            </div>
-
-            <div className="composer-tags" aria-hidden="true">
-              <span>Attachments later</span>
-              <span className="send-pill">Send</span>
-            </div>
-          </footer>
-        </section>
+        </footer>
       </section>
     </main>
   );
