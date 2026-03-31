@@ -28,12 +28,16 @@ This repository is a disciplined Phase 1 baseline for a future Hermes gateway we
 
 1. `npm install`
 2. Copy `.env.example` to `.env.local`
-3. Set the Hermes API server values:
+3. In the `hermes-agent` environment, enable the Hermes API server:
+   `API_SERVER_ENABLED=true`
+   If auth is enabled there, set a matching `API_SERVER_KEY` and use the same value for `HERMES_API_KEY` in this app
+4. Set the Hermes API server values in `hermes-chat/.env.local`:
    `HERMES_API_BASE_URL` should include the OpenAI-compatible `/v1` prefix and defaults to `http://localhost:8642/v1`
    `HERMES_MODEL` should match the model exposed by the Hermes API server and defaults to `hermes-agent`
    `HERMES_API_KEY` is optional if your local Hermes API server does not require auth
-4. Start the Hermes API server
-5. Run `npm run dev`
+5. Start the Hermes API server
+6. If you changed the `hermes-agent` environment, restart or reload the Hermes gateway before testing the chat app, or message sends will keep failing against stale gateway state
+7. Run `npm run dev`
 
 This backend slice uses the Hermes OpenAI-compatible API server as a temporary boundary. It is not the final gateway-native session model.
 

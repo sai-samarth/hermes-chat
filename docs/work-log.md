@@ -28,4 +28,5 @@ First backend vertical slice:
 - Added `app/api/chat/route.ts` to validate message lists and return a basic assistant reply payload.
 - Converted the single-route UI into a working local-state chat flow with submit, loading, and transcript updates.
 - Added `.env.example` and updated docs to describe the temporary Hermes API server boundary and setup.
+- Manual testing confirmed the setup needs `hermes-chat/.env.local`, `API_SERVER_ENABLED=true` in the `hermes-agent` environment, a matching `API_SERVER_KEY` when auth is enabled, and a Hermes gateway restart or reload after `hermes-agent` env changes before the chat app can send messages.
 - Kept auth, persistence, attachments, streaming, and the final gateway-native session model out of scope.
