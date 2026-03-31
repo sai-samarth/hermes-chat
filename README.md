@@ -29,8 +29,8 @@ This repository is a disciplined Phase 1 baseline for a future Hermes gateway we
 1. `npm install`
 2. Copy `.env.example` to `.env.local`
 3. Set the Hermes API server values:
-   `HERMES_API_BASE_URL` should include the OpenAI-compatible `/v1` prefix
-   `HERMES_MODEL` should match the model exposed by the Hermes API server
+   `HERMES_API_BASE_URL` should include the OpenAI-compatible `/v1` prefix and defaults to `http://localhost:8642/v1`
+   `HERMES_MODEL` should match the model exposed by the Hermes API server and defaults to `hermes-agent`
    `HERMES_API_KEY` is optional if your local Hermes API server does not require auth
 4. Start the Hermes API server
 5. Run `npm run dev`
