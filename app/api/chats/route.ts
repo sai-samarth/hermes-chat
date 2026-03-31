@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { AuthError, requireAuthenticatedUser } from "@/lib/auth";
 import {
   ChatStoreError,
   createChat,
@@ -50,7 +51,8 @@ async function readOptionalPayload(request: Request) {
 
 export async function GET() {
   try {
-    const chats = listChats();
+    const user = await requireAuthenticatedUser();
+    const chats = listChats(user.id);
 
     return NextResponse.json({
       chats,
@@ -73,16 +75,24 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
+    const user = await requireAuthenticatedUser();
     const payload = await readOptionalPayload(request);
 
     if (payload !== null && !isRecord(payload)) {
       throw new ChatStoreError("Request body must be a JSON object.", 400);
     }
 
-    const chat = createChat(validateTitle(payload?.title));
+    const chat = createChat(user.id, validateTitle(payload?.title));
 
     return NextResponse.json(chat, { status: 201 });
   } catch (error) {
+    if (error instanceof AuthError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: error.status }
+      );
+    }
+
     if (error instanceof ChatStoreError) {
       return NextResponse.json(
         { error: error.message },

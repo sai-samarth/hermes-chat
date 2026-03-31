@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { AuthError, requireAuthenticatedUser } from "@/lib/auth";
 import {
   appendMessage,
   ChatStoreError,
@@ -55,6 +56,7 @@ function validateContent(value: unknown) {
 
 export async function POST(request: Request) {
   try {
+    const user = await requireAuthenticatedUser();
     const payload = (await request.json()) as
       | { chatId?: unknown; content?: unknown }
       | null;
@@ -66,16 +68,16 @@ export async function POST(request: Request) {
     const chatId = validateChatId(payload.chatId);
     const content = validateContent(payload.content);
 
-    const userMessage = appendMessage(chatId, {
+    const userMessage = appendMessage(user.id, chatId, {
       role: "user",
       content
     });
 
     const assistantMessage = await createHermesAssistantMessage(
-      listMessagesForHermes(chatId, MAX_CONTEXT_MESSAGES)
+      listMessagesForHermes(user.id, chatId, MAX_CONTEXT_MESSAGES)
     );
-    const message = appendMessage(chatId, assistantMessage);
-    const chat = getChat(chatId);
+    const message = appendMessage(user.id, chatId, assistantMessage);
+    const chat = getChat(user.id, chatId);
 
     if (!chat) {
       throw new ChatStoreError("Chat not found.", 404);
@@ -87,6 +89,13 @@ export async function POST(request: Request) {
       message
     });
   } catch (error) {
+    if (error instanceof AuthError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: error.status }
+      );
+    }
+
     if (error instanceof SyntaxError) {
       return NextResponse.json(
         { error: "Request body must be valid JSON." },

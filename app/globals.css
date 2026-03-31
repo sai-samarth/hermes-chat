@@ -10,6 +10,9 @@
   --text: #12161c;
   --muted: #5c6571;
   --muted-soft: #7b8592;
+  --accent: #20364f;
+  --accent-soft: #e8edf3;
+  --accent-muted: #46607d;
   --shadow: 0 18px 40px rgba(15, 23, 42, 0.05);
 }
 
@@ -28,7 +31,9 @@ html {
 
 body {
   margin: 0;
-  background: var(--bg);
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.85), transparent 28%),
+    linear-gradient(180deg, #f3f4f7 0%, #eceff3 100%);
   color: var(--text);
   font-family:
     "SF Pro Text",
@@ -58,6 +63,224 @@ code {
 .preview-shell {
   min-height: 100vh;
   padding: clamp(1rem, 2.2vw, 1.75rem);
+}
+
+.auth-shell {
+  min-height: calc(100vh - clamp(2rem, 4.4vw, 3.5rem));
+  max-width: 1180px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(360px, 440px);
+  gap: 1.25rem;
+}
+
+.auth-hero,
+.auth-panel {
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  box-shadow: var(--shadow);
+}
+
+.auth-hero {
+  padding: clamp(1.8rem, 4vw, 3rem);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 2.25rem;
+  background:
+    linear-gradient(140deg, rgba(255, 255, 255, 0.94), rgba(241, 245, 250, 0.9)),
+    linear-gradient(120deg, rgba(32, 54, 79, 0.08), transparent 45%);
+}
+
+.auth-brand {
+  padding: 0;
+}
+
+.auth-title {
+  max-width: 14ch;
+  margin: 0;
+  font-size: clamp(2.6rem, 5vw, 4.7rem);
+  line-height: 0.96;
+  letter-spacing: -0.07em;
+  font-weight: 680;
+}
+
+.auth-copy {
+  max-width: 38rem;
+  margin: 1.2rem 0 0;
+  color: var(--muted);
+  font-size: 1.05rem;
+  line-height: 1.75;
+}
+
+.auth-facts {
+  margin: 0;
+  padding: 1.05rem 0 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  border-top: 1px solid rgba(32, 54, 79, 0.08);
+}
+
+.auth-facts dt {
+  margin: 0;
+  color: var(--muted-soft);
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.auth-facts dd {
+  margin: 0.4rem 0 0;
+  color: var(--text);
+  font-size: 0.98rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.auth-panel {
+  padding: 1.15rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.auth-toggle {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.4rem;
+  padding: 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-subtle);
+}
+
+.auth-toggle-button,
+.sidebar-secondary-action {
+  height: 2.5rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font: inherit;
+  font-size: 0.92rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    transform 160ms ease,
+    opacity 160ms ease;
+}
+
+.auth-toggle-button {
+  background: transparent;
+  color: var(--muted);
+}
+
+.auth-toggle-button-active {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.auth-toggle-button:disabled,
+.sidebar-secondary-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.auth-panel-copy {
+  padding: 0.6rem 0.3rem 0;
+}
+
+.auth-panel-copy h2 {
+  margin: 0.3rem 0 0;
+  font-size: 1.7rem;
+  line-height: 1.08;
+  letter-spacing: -0.05em;
+}
+
+.auth-panel-copy p:last-child {
+  margin: 0.75rem 0 0;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.95rem;
+  padding: 1.15rem;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: linear-gradient(180deg, #ffffff 0%, #fafbfd 100%);
+}
+
+.auth-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.auth-input {
+  width: 100%;
+  height: 3rem;
+  padding: 0 0.95rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.98rem;
+}
+
+.auth-input:focus {
+  outline: 2px solid rgba(32, 54, 79, 0.12);
+  outline-offset: 1px;
+  border-color: var(--accent-muted);
+}
+
+.auth-input:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.auth-status {
+  min-height: 1.5rem;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+.auth-status-error {
+  color: #9f2a2a;
+}
+
+.auth-submit {
+  height: 3rem;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #16212d 0%, #24384d 100%);
+  color: #ffffff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
+}
+
+.auth-submit:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.auth-submit:not(:disabled):hover,
+.sidebar-secondary-action:not(:disabled):hover {
+  transform: translateY(-1px);
 }
 
 .workspace-shell {
@@ -268,6 +491,27 @@ code {
 
 .sidebar-note {
   margin-top: 0.35rem;
+}
+
+.sidebar-account {
+  margin-bottom: 0.85rem;
+}
+
+.sidebar-account-email {
+  margin: 0.25rem 0 0;
+  color: var(--text);
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.sidebar-secondary-action {
+  width: 100%;
+  margin-bottom: 1rem;
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--border);
 }
 
 .chat-panel {
@@ -506,6 +750,10 @@ code {
 }
 
 @media (max-width: 1180px) {
+  .auth-shell {
+    grid-template-columns: 1fr;
+  }
+
   .chat-topbar {
     grid-template-columns: 1fr;
   }
@@ -516,6 +764,54 @@ code {
 
   .chat-facts {
     max-width: 32rem;
+  }
+}
+
+@media (max-width: 960px) {
+  .workspace-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .composer-form {
+    grid-template-columns: 1fr;
+  }
+
+  .composer-actions {
+    align-items: stretch;
+  }
+
+  .composer-status {
+    max-width: none;
+    text-align: left;
+  }
+}
+
+@media (max-width: 720px) {
+  .preview-shell {
+    padding: 0.85rem;
+  }
+
+  .auth-hero,
+  .auth-panel,
+  .workspace-shell {
+    border-radius: 18px;
+  }
+
+  .auth-facts,
+  .chat-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .message-list,
+  .chat-topbar,
+  .composer-shell {
+    padding-left: 1.2rem;
+    padding-right: 1.2rem;
   }
 }
 

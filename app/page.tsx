@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent
+} from "react";
 
 import type {
   ChatDetail,
@@ -33,6 +39,20 @@ type ChatListResponse = {
   selectedChatId: string | null;
 };
 
+type SessionUser = {
+  email: string;
+  id: string;
+};
+
+type SessionResponse = {
+  authenticated: boolean;
+  user: SessionUser | null;
+};
+
+type AuthResponse = {
+  user?: SessionUser;
+};
+
 type ApiErrorResponse = {
   error?: string;
 };
@@ -47,6 +67,8 @@ type ThreadDetailFact = {
   label: string;
   value: string;
 };
+
+type AuthMode = "login" | "register";
 
 async function readJson<T>(response: Response): Promise<T | null> {
   return (await response.json().catch(() => null)) as T | null;
@@ -168,11 +190,22 @@ function getMessageAuthor(role: PersistedChatMessage["role"]) {
 }
 
 export default function Home() {
+  const [sessionState, setSessionState] = useState<
+    "loading" | "anonymous" | "authenticated"
+  >("loading");
+  const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
+  const [authMode, setAuthMode] = useState<AuthMode>("login");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authPending, setAuthPending] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [messages, setMessages] = useState<PersistedChatMessage[]>([]);
   const [draft, setDraft] = useState("");
-  const [isBootstrapping, setIsBootstrapping] = useState(true);
+  const [isBootstrapping, setIsBootstrapping] = useState(false);
   const [isLoadingChat, setIsLoadingChat] = useState(false);
   const [isCreatingChat, setIsCreatingChat] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -180,11 +213,19 @@ export default function Home() {
   const [composerError, setComposerError] = useState<string | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
 
+  const isAuthenticated =
+    sessionState === "authenticated" && sessionUser !== null;
   const currentChat =
     chats.find((chat) => chat.id === selectedChatId) ?? null;
+  const sessionUserId = sessionUser?.id ?? null;
   const sidebarBusy =
-    isBootstrapping || isLoadingChat || isCreatingChat || isSending;
+    isBootstrapping ||
+    isLoadingChat ||
+    isCreatingChat ||
+    isSending ||
+    isLoggingOut;
   const composerBusy = sidebarBusy || !selectedChatId;
+  const authBusy = authPending || sessionState === "loading";
   const threadFacts: ThreadDetailFact[] = [
     {
       label: "Boundary",
@@ -196,14 +237,35 @@ export default function Home() {
     },
     {
       label: "Auth",
-      value: "Local anonymous"
+      value: "Local email/password"
     }
   ];
+
+  const resetWorkspaceState = useCallback(() => {
+    setChats([]);
+    setSelectedChatId(null);
+    setMessages([]);
+    setDraft("");
+    setIsBootstrapping(false);
+    setIsLoadingChat(false);
+    setIsCreatingChat(false);
+    setIsSending(false);
+    setLoadError(null);
+    setComposerError(null);
+  }, []);
+
+  const moveToSignedOut = useCallback((message?: string) => {
+    resetWorkspaceState();
+    setSessionUser(null);
+    setSessionState("anonymous");
+    setAuthPassword("");
+    setAuthError(message ?? null);
+  }, [resetWorkspaceState]);
 
   useEffect(() => {
     const transcriptNode = transcriptRef.current;
 
-    if (!transcriptNode) {
+    if (!transcriptNode || !isAuthenticated) {
       return;
     }
 
@@ -211,14 +273,53 @@ export default function Home() {
       top: transcriptNode.scrollHeight,
       behavior: "smooth"
     });
-  }, [isLoadingChat, isSending, messages]);
+  }, [isAuthenticated, isLoadingChat, isSending, messages]);
 
   useEffect(() => {
+    async function loadSession() {
+      try {
+        const response = await fetch("/api/session", {
+          cache: "no-store"
+        });
+        const payload = await readJson<SessionResponse & ApiErrorResponse>(
+          response
+        );
+
+        if (!response.ok) {
+          throw new Error(payload?.error ?? "Could not load the current session.");
+        }
+
+        if (payload?.authenticated && payload.user) {
+          setSessionUser(payload.user);
+          setSessionState("authenticated");
+          setAuthError(null);
+          return;
+        }
+
+        moveToSignedOut();
+      } catch (error) {
+        moveToSignedOut(
+          error instanceof Error
+            ? error.message
+            : "Could not load the current session."
+        );
+      }
+    }
+
+    void loadSession();
+  }, [moveToSignedOut]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !sessionUserId) {
+      return;
+    }
+
     let cancelled = false;
 
     async function bootstrapWorkspace() {
       setIsBootstrapping(true);
       setLoadError(null);
+      setComposerError(null);
 
       try {
         const listResponse = await fetch("/api/chats", {
@@ -227,6 +328,13 @@ export default function Home() {
         const listPayload = await readJson<
           ChatListResponse & ApiErrorResponse
         >(listResponse);
+
+        if (listResponse.status === 401) {
+          if (!cancelled) {
+            moveToSignedOut(listPayload?.error ?? "Session expired. Log in again.");
+          }
+          return;
+        }
 
         if (!listResponse.ok) {
           throw new Error(listPayload?.error ?? "Could not load chats.");
@@ -255,6 +363,13 @@ export default function Home() {
           detailResponse
         );
 
+        if (detailResponse.status === 401) {
+          if (!cancelled) {
+            moveToSignedOut(detailPayload?.error ?? "Session expired. Log in again.");
+          }
+          return;
+        }
+
         if (!detailResponse.ok) {
           throw new Error(detailPayload?.error ?? "Could not load chat history.");
         }
@@ -268,7 +383,7 @@ export default function Home() {
         }
 
         setChats((currentChats) => upsertChat(currentChats, detailPayload.chat));
-        setMessages(detailPayload?.messages ?? []);
+        setMessages(detailPayload.messages ?? []);
       } catch (error) {
         if (cancelled) {
           return;
@@ -290,7 +405,77 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isAuthenticated, moveToSignedOut, sessionUserId]);
+
+  async function handleAuthSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (authBusy) {
+      return;
+    }
+
+    setAuthPending(true);
+    setAuthError(null);
+
+    try {
+      const response = await fetch(`/api/auth/${authMode}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          email: authEmail,
+          password: authPassword
+        })
+      });
+      const payload = await readJson<AuthResponse & ApiErrorResponse>(response);
+
+      if (!response.ok) {
+        throw new Error(
+          payload?.error ??
+            (authMode === "login"
+              ? "Could not log in."
+              : "Could not create the account.")
+        );
+      }
+
+      if (!payload?.user) {
+        throw new Error("Auth response was malformed.");
+      }
+
+      resetWorkspaceState();
+      setSessionUser(payload.user);
+      setSessionState("authenticated");
+      setAuthPassword("");
+    } catch (error) {
+      setAuthError(
+        error instanceof Error
+          ? error.message
+          : authMode === "login"
+            ? "Could not log in."
+            : "Could not create the account."
+      );
+    } finally {
+      setAuthPending(false);
+    }
+  }
+
+  async function handleLogout() {
+    if (isLoggingOut) {
+      return;
+    }
+
+    setIsLoggingOut(true);
+
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST"
+      });
+    } finally {
+      setIsLoggingOut(false);
+      moveToSignedOut();
+    }
+  }
 
   async function loadChat(chatId: string) {
     setIsLoadingChat(true);
@@ -305,6 +490,11 @@ export default function Home() {
       });
       const payload = await readJson<ChatDetail & ApiErrorResponse>(response);
 
+      if (response.status === 401) {
+        moveToSignedOut(payload?.error ?? "Session expired. Log in again.");
+        return;
+      }
+
       if (!response.ok) {
         throw new Error(payload?.error ?? "Could not load chat history.");
       }
@@ -314,7 +504,7 @@ export default function Home() {
       }
 
       setChats((currentChats) => upsertChat(currentChats, payload.chat));
-      setMessages(payload?.messages ?? []);
+      setMessages(payload.messages ?? []);
     } catch (error) {
       setLoadError(
         error instanceof Error ? error.message : "Could not load chat history."
@@ -342,6 +532,11 @@ export default function Home() {
         body: JSON.stringify({})
       });
       const payload = await readJson<ChatDetail & ApiErrorResponse>(response);
+
+      if (response.status === 401) {
+        moveToSignedOut(payload?.error ?? "Session expired. Log in again.");
+        return;
+      }
 
       if (!response.ok) {
         throw new Error(payload?.error ?? "Could not create a chat.");
@@ -416,6 +611,11 @@ export default function Home() {
         response
       );
 
+      if (response.status === 401) {
+        moveToSignedOut(payload?.error ?? "Session expired. Log in again.");
+        return;
+      }
+
       if (!response.ok) {
         throw new Error(payload?.error ?? "The Hermes request failed.");
       }
@@ -450,6 +650,138 @@ export default function Home() {
     }
   }
 
+  if (!isAuthenticated || !sessionUser) {
+    return (
+      <main className="preview-shell">
+        <section className="auth-shell">
+          <div className="auth-hero">
+            <div className="sidebar-top auth-brand">
+              <div className="brand-mark">H</div>
+
+              <div>
+                <p className="eyebrow">Hermes Chat</p>
+                <p className="sidebar-title">Local auth workspace</p>
+              </div>
+            </div>
+
+            <h1 className="auth-title">Private local chat history, scoped per account.</h1>
+            <p className="auth-copy">
+              Sign in with email and password to unlock your own SQLite-backed
+              workspace. Hermes still stays behind the same Next.js server-side
+              API boundary, but chats now belong to a real local user session.
+            </p>
+
+            <dl className="auth-facts" aria-label="Current backend slice">
+              {threadFacts.map((fact) => (
+                <div key={fact.label}>
+                  <dt>{fact.label}</dt>
+                  <dd>{fact.value}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+
+          <section className="auth-panel" aria-label="Authentication">
+            <div className="auth-toggle" role="tablist" aria-label="Auth mode">
+              <button
+                type="button"
+                className={`auth-toggle-button${authMode === "login" ? " auth-toggle-button-active" : ""}`}
+                onClick={() => {
+                  setAuthMode("login");
+                  setAuthError(null);
+                }}
+                disabled={authBusy}
+              >
+                Log in
+              </button>
+              <button
+                type="button"
+                className={`auth-toggle-button${authMode === "register" ? " auth-toggle-button-active" : ""}`}
+                onClick={() => {
+                  setAuthMode("register");
+                  setAuthError(null);
+                }}
+                disabled={authBusy}
+              >
+                Register
+              </button>
+            </div>
+
+            <div className="auth-panel-copy">
+              <p className="eyebrow">Local session</p>
+              <h2>
+                {authMode === "login"
+                  ? "Return to your workspace"
+                  : "Create a local account"}
+              </h2>
+              <p>
+                {authMode === "login"
+                  ? "Your session is issued from the Next.js backend as an HttpOnly cookie."
+                  : "New accounts are stored locally in SQLite with secure password hashing."}
+              </p>
+            </div>
+
+            <form className="auth-form" onSubmit={handleAuthSubmit}>
+              <label className="auth-field">
+                <span className="composer-label">Email</span>
+                <input
+                  className="auth-input"
+                  type="email"
+                  name="email"
+                  autoComplete="email"
+                  value={authEmail}
+                  onChange={(event) => setAuthEmail(event.target.value)}
+                  placeholder="name@company.com"
+                  disabled={authBusy}
+                />
+              </label>
+
+              <label className="auth-field">
+                <span className="composer-label">Password</span>
+                <input
+                  className="auth-input"
+                  type="password"
+                  name="password"
+                  autoComplete={
+                    authMode === "login" ? "current-password" : "new-password"
+                  }
+                  value={authPassword}
+                  onChange={(event) => setAuthPassword(event.target.value)}
+                  placeholder="At least 8 characters"
+                  disabled={authBusy}
+                />
+              </label>
+
+              {authError ? (
+                <p className="auth-status auth-status-error" role="alert">
+                  {authError}
+                </p>
+              ) : (
+                <p className="auth-status" aria-live="polite">
+                  {sessionState === "loading"
+                    ? "Checking for an active local session..."
+                    : authMode === "login"
+                      ? "Use the account you already created on this local instance."
+                      : "Passwords are hashed before they are written to SQLite."}
+                </p>
+              )}
+
+              <button className="auth-submit" type="submit" disabled={authBusy}>
+                {authPending
+                  ? authMode === "login"
+                    ? "Signing in..."
+                    : "Creating..."
+                  : authMode === "login"
+                    ? "Log in"
+                    : "Create account"}
+              </button>
+            </form>
+          </section>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="preview-shell">
       <div className="workspace-shell">
@@ -461,8 +793,8 @@ export default function Home() {
               <p className="eyebrow">Hermes Chat</p>
               <p className="sidebar-title">Support workspace</p>
               <p className="sidebar-intro">
-                Enterprise conversations, draft refinement, and Hermes-backed
-                chat history in one restrained workspace.
+                Personal local conversations, secure cookie sessions, and
+                Hermes-backed chat history in one restrained workspace.
               </p>
             </div>
           </div>
@@ -514,10 +846,25 @@ export default function Home() {
           </section>
 
           <div className="sidebar-foot">
+            <div className="sidebar-account">
+              <p className="sidebar-note-title">Signed in as</p>
+              <p className="sidebar-account-email">{sessionUser.email}</p>
+            </div>
+
+            <button
+              type="button"
+              className="sidebar-secondary-action"
+              onClick={() => void handleLogout()}
+              disabled={isLoggingOut}
+            >
+              {isLoggingOut ? "Signing out..." : "Log out"}
+            </button>
+
             <p className="sidebar-note-title">Backend slice</p>
             <p className="sidebar-note">
-              SQLite persistence is live for this local workspace. Postgres and
-              gateway-native Hermes sessions can come later.
+              Chats are now scoped to a local user account with secure cookie
+              sessions. Postgres and gateway-native Hermes sessions can come
+              later.
             </p>
           </div>
         </aside>
@@ -528,14 +875,21 @@ export default function Home() {
               <p className="eyebrow">Local workspace</p>
 
               <div className="chat-heading-row">
-                <h1>{currentChat?.title ?? "Loading chats"}</h1>
-                <span className="review-pill">SQLite slice</span>
+                <h1>
+                  {currentChat?.title ??
+                    (isBootstrapping
+                      ? "Loading chats"
+                      : chats.length === 0
+                        ? "Create your first chat"
+                        : "Choose a chat")}
+                </h1>
+                <span className="review-pill">Auth slice</span>
               </div>
 
               <p className="chat-summary">
-                Messages now persist in a local SQLite file, refresh keeps the
-                current history intact, and Hermes still sits behind the same
-                server-side API boundary.
+                Chats now persist in a local SQLite file under your account,
+                refresh keeps your personal history intact, and Hermes still
+                sits behind the same server-side API boundary.
               </p>
             </div>
 
@@ -561,7 +915,7 @@ export default function Home() {
                 ? "Loading chats"
                 : isLoadingChat
                   ? "Loading history"
-                  : "Persisted history"}
+                  : "Scoped history"}
             </p>
 
             {loadError ? (
@@ -580,8 +934,9 @@ export default function Home() {
                   <span>Ready</span>
                 </div>
                 <p className="message-copy">
-                  This chat is empty. Send the first message and the transcript
-                  will be stored in SQLite for the next refresh.
+                  {selectedChatId
+                    ? "This chat is empty. Send the first message and the transcript will be stored in SQLite under your account."
+                    : "No chat is selected yet. Create one to start a private local transcript."}
                 </p>
               </article>
             ) : null}
@@ -634,9 +989,9 @@ export default function Home() {
                   disabled={composerBusy}
                 />
                 <p className="composer-copy">
-                  Single anonymous workspace with SQLite-backed chat history.
-                  Postgres and gateway-native Hermes sessions stay out of scope
-                  for this phase.
+                  Personal workspace with SQLite-backed chat history and local
+                  email/password auth. Postgres and gateway-native Hermes
+                  sessions stay out of scope for this phase.
                 </p>
               </div>
 
@@ -651,7 +1006,9 @@ export default function Home() {
                       ? "Hermes is drafting a persisted reply..."
                       : isLoadingChat
                         ? "Loading selected chat history..."
-                        : "Messages are stored locally and survive refresh."}
+                        : !selectedChatId
+                          ? "Create a chat to start a new transcript."
+                          : "Messages are stored locally and scoped to your account."}
                   </p>
                 )}
 

@@ -40,3 +40,14 @@ SQLite persistence slice:
 - Updated `app/api/chat/route.ts` so a user message is persisted first, Hermes is called with recent persisted context, and the assistant reply is persisted second.
 - Rewired the UI to load real chats into the sidebar, create a default chat when the database is empty, switch between chats, and keep history across refreshes.
 - Left auth, Postgres, streaming, attachments, and the final gateway-native Hermes session model out of scope for later phases.
+
+Local auth and session slice:
+
+- Added shared SQLite initialization in `lib/db.ts` and extended the schema with `users`, `sessions`, and nullable chat ownership via `owner_user_id`.
+- Kept the existing chats/messages tables intact so prior data is not destroyed; legacy ownerless chats may remain unreachable after the migration.
+- Added local email/password registration and login with password hashing based on Node's `scrypt`.
+- Added secure HttpOnly session cookies issued by the Next.js backend and stored hashed session tokens in SQLite.
+- Added `app/api/auth/register/route.ts`, `app/api/auth/login/route.ts`, `app/api/auth/logout/route.ts`, and `app/api/session/route.ts`.
+- Scoped chat list, chat detail, chat creation, and message append/Hermes send operations to the authenticated user only.
+- Reworked the single route so signed-out users see a clean auth screen while signed-in users see the existing chat workspace.
+- Updated setup docs and environment examples for the local-auth phase while keeping Hermes behind the same server-side API boundary.

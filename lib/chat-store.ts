@@ -1,10 +1,6 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
-import path from "node:path";
-
-import DatabaseConstructor from "better-sqlite3";
 
 import type {
   ChatDetail,
@@ -13,8 +9,7 @@ import type {
   ChatSummary,
   PersistedChatMessage
 } from "@/lib/chat-types";
-
-type DatabaseInstance = InstanceType<typeof DatabaseConstructor>;
+import { getDb } from "@/lib/db";
 
 type ChatSummaryRow = {
   created_at: string;
@@ -31,12 +26,6 @@ type MessageRow = {
   id: string;
   role: ChatMessageRole;
 };
-
-declare global {
-  var __hermesChatDb: DatabaseInstance | undefined;
-}
-
-const DEFAULT_DB_PATH = path.join(process.cwd(), "data", "hermes-chat.sqlite");
 export const DEFAULT_CHAT_TITLE = "New chat";
 export const MAX_CHAT_TITLE_LENGTH = 80;
 const MAX_PREVIEW_LENGTH = 120;
@@ -49,64 +38,6 @@ export class ChatStoreError extends Error {
     this.name = "ChatStoreError";
     this.status = status;
   }
-}
-
-function resolveDatabasePath() {
-  const configuredPath = process.env.SQLITE_DB_PATH?.trim();
-
-  if (!configuredPath) {
-    return DEFAULT_DB_PATH;
-  }
-
-  return path.isAbsolute(configuredPath)
-    ? configuredPath
-    : path.resolve(/* turbopackIgnore: true */ process.cwd(), configuredPath);
-}
-
-export function getChatDatabasePath() {
-  return resolveDatabasePath();
-}
-
-function initializeDatabase(db: DatabaseInstance) {
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
-  db.pragma("busy_timeout = 5000");
-  db.pragma("synchronous = NORMAL");
-
-  db.exec(`
-    create table if not exists chats (
-      id text primary key,
-      title text not null,
-      created_at text not null,
-      updated_at text not null
-    );
-
-    create table if not exists messages (
-      id text primary key,
-      chat_id text not null references chats(id) on delete cascade,
-      role text not null check (role in ('system', 'user', 'assistant')),
-      content text not null,
-      created_at text not null
-    );
-
-    create index if not exists idx_messages_chat_created_at
-      on messages (chat_id, created_at, id);
-  `);
-}
-
-function getDb() {
-  if (globalThis.__hermesChatDb) {
-    return globalThis.__hermesChatDb;
-  }
-
-  const databasePath = resolveDatabasePath();
-  mkdirSync(path.dirname(databasePath), { recursive: true });
-
-  const db = new DatabaseConstructor(databasePath);
-  initializeDatabase(db);
-
-  globalThis.__hermesChatDb = db;
-  return db;
 }
 
 function normalizeWhitespace(value: string) {
@@ -173,7 +104,7 @@ function mapPersistedMessage(row: MessageRow): PersistedChatMessage {
   };
 }
 
-function getChatSummary(chatId: string) {
+function getChatSummary(userId: string, chatId: string) {
   const db = getDb();
   const row = db
     .prepare(
@@ -197,42 +128,30 @@ function getChatSummary(chatId: string) {
           ) as message_count
         from chats c
         where c.id = ?
+          and c.owner_user_id = ?
       `
     )
-    .get(chatId) as ChatSummaryRow | undefined;
+    .get(chatId, userId) as ChatSummaryRow | undefined;
 
   return row ? mapChatSummary(row) : null;
 }
 
-function createChatInternal(title = DEFAULT_CHAT_TITLE) {
+function createChatInternal(userId: string, title = DEFAULT_CHAT_TITLE) {
   const db = getDb();
   const chatId = randomUUID();
   const timestamp = new Date().toISOString();
 
   db.prepare(
     `
-      insert into chats (id, title, created_at, updated_at)
-      values (?, ?, ?, ?)
+      insert into chats (id, title, created_at, updated_at, owner_user_id)
+      values (?, ?, ?, ?, ?)
     `
-  ).run(chatId, title, timestamp, timestamp);
+  ).run(chatId, title, timestamp, timestamp, userId);
 
   return chatId;
 }
 
-function ensureDefaultChat() {
-  const db = getDb();
-  const row = db
-    .prepare("select count(*) as count from chats")
-    .get() as { count: number };
-
-  if (Number(row.count) === 0) {
-    createChatInternal();
-  }
-}
-
-export function listChats(): ChatSummary[] {
-  ensureDefaultChat();
-
+export function listChats(userId: string): ChatSummary[] {
   const db = getDb();
   const rows = db
     .prepare(
@@ -255,16 +174,17 @@ export function listChats(): ChatSummary[] {
             where m.chat_id = c.id
           ) as message_count
         from chats c
+        where c.owner_user_id = ?
         order by c.updated_at desc, c.created_at desc, c.id desc
       `
     )
-    .all() as ChatSummaryRow[];
+    .all(userId) as ChatSummaryRow[];
 
   return rows.map(mapChatSummary);
 }
 
-export function getChat(chatId: string): ChatDetail | null {
-  const chat = getChatSummary(chatId);
+export function getChat(userId: string, chatId: string): ChatDetail | null {
+  const chat = getChatSummary(userId, chatId);
 
   if (!chat) {
     return null;
@@ -274,13 +194,15 @@ export function getChat(chatId: string): ChatDetail | null {
   const messages = db
     .prepare(
       `
-        select id, role, content, created_at
-        from messages
-        where chat_id = ?
-        order by created_at asc, id asc
+        select m.id, m.role, m.content, m.created_at
+        from messages m
+        join chats c on c.id = m.chat_id
+        where m.chat_id = ?
+          and c.owner_user_id = ?
+        order by m.created_at asc, m.id asc
       `
     )
-    .all(chatId) as MessageRow[];
+    .all(chatId, userId) as MessageRow[];
 
   return {
     chat,
@@ -288,9 +210,9 @@ export function getChat(chatId: string): ChatDetail | null {
   };
 }
 
-export function createChat(title?: string) {
-  const chatId = createChatInternal(normalizeStoredChatTitle(title));
-  const chat = getChat(chatId);
+export function createChat(userId: string, title?: string) {
+  const chatId = createChatInternal(userId, normalizeStoredChatTitle(title));
+  const chat = getChat(userId, chatId);
 
   if (!chat) {
     throw new ChatStoreError("Chat could not be created.", 500);
@@ -300,6 +222,7 @@ export function createChat(title?: string) {
 }
 
 export function appendMessage(
+  userId: string,
   chatId: string,
   message: ChatMessage
 ): PersistedChatMessage {
@@ -309,8 +232,15 @@ export function appendMessage(
 
   const insertMessage = db.transaction(() => {
     const chatRow = db
-      .prepare("select title from chats where id = ?")
-      .get(chatId) as { title: string } | undefined;
+      .prepare(
+        `
+          select title
+          from chats
+          where id = ?
+            and owner_user_id = ?
+        `
+      )
+      .get(chatId, userId) as { title: string } | undefined;
 
     if (!chatRow) {
       throw new ChatStoreError("Chat not found.", 404);
@@ -355,11 +285,22 @@ export function appendMessage(
   };
 }
 
-export function listMessagesForHermes(chatId: string, limit: number) {
+export function listMessagesForHermes(
+  userId: string,
+  chatId: string,
+  limit: number
+) {
   const db = getDb();
   const chatExists = db
-    .prepare("select 1 as found from chats where id = ?")
-    .get(chatId) as { found: number } | undefined;
+    .prepare(
+      `
+        select 1 as found
+        from chats
+        where id = ?
+          and owner_user_id = ?
+      `
+    )
+    .get(chatId, userId) as { found: number } | undefined;
 
   if (!chatExists) {
     throw new ChatStoreError("Chat not found.", 404);

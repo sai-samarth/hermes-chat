@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { AuthError, requireAuthenticatedUser } from "@/lib/auth";
 import { ChatStoreError, getChat } from "@/lib/chat-store";
 
 type RouteContext = {
@@ -18,9 +19,10 @@ function validateChatId(value: string) {
 
 export async function GET(_request: Request, context: RouteContext) {
   try {
+    const user = await requireAuthenticatedUser();
     const { chatId: rawChatId } = await context.params;
     const chatId = validateChatId(rawChatId);
-    const chat = getChat(chatId);
+    const chat = getChat(user.id, chatId);
 
     if (!chat) {
       throw new ChatStoreError("Chat not found.", 404);
@@ -28,6 +30,13 @@ export async function GET(_request: Request, context: RouteContext) {
 
     return NextResponse.json(chat);
   } catch (error) {
+    if (error instanceof AuthError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: error.status }
+      );
+    }
+
     if (error instanceof ChatStoreError) {
       return NextResponse.json(
         { error: error.message },
