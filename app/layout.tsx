@@ -4,9 +4,9 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Hermes Chat | App Shell Review",
+  title: "Hermes Chat | Support Workspace",
   description:
-    "Static single-route app-shell review for Hermes Chat with a cleaner, conversation-first layout."
+    "Static single-route support workspace shell for Hermes Chat, refined for final frontend review."
 };
 
 type RootLayoutProps = Readonly<{

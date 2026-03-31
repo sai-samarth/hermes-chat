@@ -1,188 +1,204 @@
 const threads = [
   {
-    title: "Customer escalation draft",
-    detail: "Selected review thread",
+    title: "Apex Labs renewal escalation",
+    updated: "2m ago",
+    blurb: "Legal review requested before the executive reply goes out.",
+    meta: "Priority thread",
     active: true
   },
   {
-    title: "Bug triage summary",
-    detail: "Yesterday",
+    title: "Northwind migration handoff",
+    updated: "48m ago",
+    blurb: "Entitlements summary and rollout timing are ready for review.",
+    meta: "Operations",
     active: false
   },
   {
-    title: "Onboarding tone pass",
-    detail: "Mar 29",
+    title: "Brightline onboarding draft",
+    updated: "Mar 29",
+    blurb: "Welcome sequence copy needs a final tone pass.",
+    meta: "Lifecycle",
     active: false
   },
   {
-    title: "Billing transcript audit",
-    detail: "Mar 27",
+    title: "Kite billing exception",
+    updated: "Mar 27",
+    blurb: "Finance wants the customer-facing explanation simplified.",
+    meta: "Billing",
     active: false
+  }
+];
+
+const facts = [
+  {
+    label: "Queue",
+    value: "Enterprise renewals"
+  },
+  {
+    label: "Owner",
+    value: "CS operations"
+  },
+  {
+    label: "Next review",
+    value: "14:00 UTC"
   }
 ];
 
 const messages = [
   {
     role: "assistant",
-    author: "Hermes Shell",
+    author: "Hermes Draft",
     time: "09:14",
     lines: [
-      "This route stays intentionally static so review stays focused on structure, spacing, and product tone.",
-      "Navigation, transcript, and composer are placeholders for a phase-1 shell review only."
+      "Proposed reply: confirm procurement coverage, acknowledge that amended language is under review, and offer leadership a revision window before the day closes.",
+      "The tone stays direct and executive. It removes soft qualifiers and avoids promising approval before legal signs off."
     ]
   },
   {
     role: "user",
-    author: "Product Review",
+    author: "Maya Chen",
     time: "09:16",
     lines: [
-      "Make the main pane feel primary. Keep the sidebar quieter and stop relying on decorative labels to explain the phase."
+      "Tighten the first paragraph. The customer only needs confirmation that procurement is covered and that the revised language will be back in front of leadership today."
     ]
   },
   {
     role: "assistant",
-    author: "Hermes Shell",
+    author: "Hermes Draft",
     time: "09:18",
     lines: [
-      "The revised direction uses flatter surfaces, tighter radii, a cleaner sans-first type system, and a calmer neutral palette.",
-      "Preview labeling stays present, but only where it helps reviewers understand that nothing is wired yet."
+      "Revision applied: procurement coverage now leads, the scheduling note moves to the second paragraph, and the approval language stays explicitly provisional."
     ]
   },
   {
     role: "user",
-    author: "Project Scope",
-    time: "09:19",
+    author: "Account Team",
+    time: "09:21",
     lines: [
-      "Keep auth, persistence, streaming, and Hermes connectivity out of this step. The route should remain a static shell in app/page.tsx."
+      "This is close. Keep the tone measured, make ownership explicit, and leave the thread with one clean next step for the customer."
     ]
   }
-];
-
-const outOfScope = [
-  "Interactive chat behavior",
-  "Authentication and accounts",
-  "Database or persistence",
-  "Hermes API integration"
 ];
 
 export default function Home() {
   return (
     <main className="preview-shell">
-      <aside className="sidebar" aria-label="Static navigation shell preview">
-        <div className="sidebar-top">
-          <div className="brand-mark">H</div>
-          <div>
-            <p className="eyebrow">Hermes Chat</p>
-            <h1>App shell review</h1>
-          </div>
-        </div>
+      <div className="workspace-shell">
+        <aside className="sidebar" aria-label="Workspace navigation">
+          <div className="sidebar-top">
+            <div className="brand-mark">H</div>
 
-        <p className="sidebar-intro">
-          Static phase-1 workspace preview focused on layout, hierarchy, and
-          overall product tone.
-        </p>
-
-        <section aria-labelledby="threads-heading" className="sidebar-section">
-          <div className="section-head">
-            <p id="threads-heading" className="section-label">
-              Preview threads
-            </p>
-            <span className="section-note">Mocked list</span>
+            <div>
+              <p className="eyebrow">Hermes Chat</p>
+              <p className="sidebar-title">Support workspace</p>
+              <p className="sidebar-intro">
+                Enterprise conversations, escalations, and response drafting in
+                one restrained workspace.
+              </p>
+            </div>
           </div>
 
-          <ul className="thread-list">
-            {threads.map((thread) => (
-              <li
-                key={thread.title}
-                className={`thread-item${thread.active ? " thread-item-active" : ""}`}
-              >
-                <p className="thread-title">{thread.title}</p>
-                <p className="thread-detail">{thread.detail}</p>
-              </li>
-            ))}
-          </ul>
-        </section>
+          <section aria-labelledby="threads-heading" className="sidebar-section">
+            <div className="section-head">
+              <p id="threads-heading" className="section-label">
+                Open threads
+              </p>
+              <p className="section-count">12 active</p>
+            </div>
 
-        <section aria-labelledby="scope-heading" className="sidebar-section sidebar-foot">
-          <p id="scope-heading" className="section-label">
-            Deferred in phase 1
-          </p>
-          <ul className="scope-list">
-            {outOfScope.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-          <p className="sidebar-note">
-            Single route at <code>app/page.tsx</code>. Static shell only.
-          </p>
-        </section>
-      </aside>
+            <ul className="thread-list">
+              {threads.map((thread) => (
+                <li
+                  key={thread.title}
+                  className={`thread-item${thread.active ? " thread-item-active" : ""}`}
+                >
+                  <div className="thread-row">
+                    <p className="thread-title">{thread.title}</p>
+                    <p className="thread-updated">{thread.updated}</p>
+                  </div>
 
-      <section className="chat-panel" aria-label="Static chat application shell">
-        <header className="chat-topbar">
-          <div className="chat-title-block">
-            <p className="eyebrow">Static preview shell</p>
-            <h2>Customer support workspace</h2>
-            <p className="chat-summary">
-              Cleaner app-shell direction for review: quieter navigation,
-              stronger conversation focus, and flatter surfaces throughout.
+                  <p className="thread-blurb">{thread.blurb}</p>
+                  <p className="thread-meta">{thread.meta}</p>
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          <div className="sidebar-foot">
+            <p className="sidebar-note-title">Review shell</p>
+            <p className="sidebar-note">
+              Single route, no live systems attached.
             </p>
           </div>
+        </aside>
 
-          <div className="chat-meta" aria-label="Preview context">
-            <p className="chat-meta-label">Phase 1 review</p>
-            <p className="chat-meta-copy">
-              Single route only.
-              <br />
-              No behavior wired.
-            </p>
-          </div>
-        </header>
+        <section className="chat-panel" aria-label="Support workspace">
+          <header className="chat-topbar">
+            <div className="chat-title-block">
+              <p className="eyebrow">Enterprise renewals</p>
 
-        <div className="review-strip">
-          <p>
-            Static review shell: transcript, sidebar, and composer remain
-            non-interactive placeholders for layout feedback only.
-          </p>
-        </div>
-
-        <div className="message-list" aria-label="Mocked conversation">
-          <p className="transcript-label">Mock transcript for shell review</p>
-
-          {messages.map((message) => (
-            <article
-              key={`${message.role}-${message.time}`}
-              className={`message message-${message.role}`}
-            >
-              <div className="message-meta">
-                <span>{message.author}</span>
-                <span>{message.time}</span>
+              <div className="chat-heading-row">
+                <h1>Apex Labs renewal escalation</h1>
+                <span className="review-pill">Static review</span>
               </div>
 
-              {message.lines.map((line) => (
-                <p key={line}>{line}</p>
-              ))}
-            </article>
-          ))}
-        </div>
+              <p className="chat-summary">
+                Customer success requested a tighter executive response before
+                legal follow-up. The conversation stays visually primary while
+                the surrounding workspace remains quiet.
+              </p>
+            </div>
 
-        <footer className="composer-shell" aria-label="Static composer preview">
-          <div className="composer-field">
-            <p className="composer-placeholder">Message Hermes Chat</p>
-            <p className="composer-copy">
-              Disabled in review. No state, streaming, auth, persistence, or
-              backend connectivity is included in this phase.
-            </p>
+            <div className="chat-context">
+              <dl className="chat-facts" aria-label="Thread details">
+                {facts.map((fact) => (
+                  <div key={fact.label}>
+                    <dt>{fact.label}</dt>
+                    <dd>{fact.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          </header>
+
+          <div className="message-list" aria-label="Conversation transcript">
+            <p className="timeline-mark">Tuesday, March 31</p>
+
+            {messages.map((message) => (
+              <article
+                key={`${message.role}-${message.time}`}
+                className={`message message-${message.role}`}
+              >
+                <div className="message-meta">
+                  <span>{message.author}</span>
+                  <span>{message.time}</span>
+                </div>
+
+                {message.lines.map((line) => (
+                  <p key={line}>{line}</p>
+                ))}
+              </article>
+            ))}
           </div>
 
-          <div className="composer-actions">
-            <span className="composer-status">Static composer</span>
+          <footer className="composer-shell" aria-label="Response draft">
+            <div className="composer-field">
+              <p className="composer-label">Response draft</p>
+              <p className="composer-placeholder">
+                Confirm procurement coverage, keep approval language precise,
+                and offer leadership a revision window before 14:00 UTC.
+              </p>
+              <p className="composer-copy">
+                Executive tone, concise confirmation, clear ownership.
+              </p>
+            </div>
+
             <button className="composer-button" type="button" disabled>
               Send
             </button>
-          </div>
-        </footer>
-      </section>
+          </footer>
+        </section>
+      </div>
     </main>
   );
 }
