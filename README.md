@@ -24,16 +24,19 @@ Hermes continuity real.
 
 1. `npm install`
 2. Copy `.env.example` to `.env.local`
-3. Set `HERMES_BRIDGE_BASELINE_PROFILE=default` in `.env.local` if you want
-   new app-user profiles to inherit the config from your existing default
-   Hermes profile
+3. By default the bridge clones new app-user profiles from your existing
+   `default` Hermes profile so provider/model config carries over. Override that
+   by setting `HERMES_BRIDGE_BASELINE_PROFILE` in `.env.local` if you want a
+   different baseline profile.
 4. Optionally set `HERMES_BRIDGE_API_KEY` if you want the Next.js backend to
    authenticate to the bridge over localhost
 5. Optionally set `SQLITE_DB_PATH` if you do not want the default
    `./data/hermes-chat.sqlite`
 6. Start the bridge with `npm run bridge`
-7. Start the app with `npm run dev`
-8. Open the app, register a local account, create a chat, and send messages
+7. Bridge-managed profiles automatically disable Honcho locally so web users do
+   not inherit the host machine's global peer memory.
+8. Start the app with `npm run dev`
+9. Open the app, register a local account, create a chat, and send messages
 
 The bridge loads `.env.local` directly, so the same file can configure both the
 Next.js app and the Python bridge.

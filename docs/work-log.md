@@ -62,9 +62,16 @@ Hermes profile bridge migration:
   mappings without changing the frontend API contract.
 - Updated `lib/hermes.ts` to call the bridge over HTTP instead of
   `/v1/chat/completions`.
+- Tightened bridge profile isolation after validation showed global Honcho
+  context could still leak through the host-level Honcho config. Bridge-managed
+  profiles now get a local `honcho.json` with `enabled: false` plus a matching
+  `config.yaml` patch.
 - Updated `app/api/chat/route.ts` so the user message is persisted first, the
   bridge is called second, returned Hermes profile/session IDs are stored third,
   and the assistant reply is persisted last.
+- Added bridge-side request serialization keyed by Hermes session ID, or by
+  `(profile, chat)` before a session exists, so overlapping sends do not fork a
+  chat into multiple Hermes sessions.
 - Added one-time bootstrap history handoff for older chats that have app-side
   history but no stored Hermes session ID yet.
 - Documented bridge setup, bridge env vars, and the new Phase 1 boundary in

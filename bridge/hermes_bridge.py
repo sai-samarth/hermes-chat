@@ -35,6 +35,8 @@ LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 _provision_lock = threading.Lock()
 _provisioned_profiles: set[str] = set()
+_request_lock_registry: dict[str, threading.Lock] = {}
+_request_lock_registry_lock = threading.Lock()
 
 
 class BridgeError(Exception):
@@ -117,7 +119,11 @@ def get_hermes_command() -> list[str]:
 
 def get_baseline_profile() -> str | None:
     baseline_profile = os.environ.get("HERMES_BRIDGE_BASELINE_PROFILE", "").strip()
-    return baseline_profile or None
+
+    if baseline_profile:
+        return baseline_profile
+
+    return "default"
 
 
 def get_expected_api_key() -> str | None:
@@ -126,14 +132,14 @@ def get_expected_api_key() -> str | None:
 
 
 def run_command(
-    args: list[str], *, timeout_seconds: int, description: str
+    args: list[str], *, timeout_seconds: int, description: str, cwd: Path | None = None
 ) -> subprocess.CompletedProcess[str]:
     try:
         return subprocess.run(
             args,
             capture_output=True,
             check=False,
-            cwd=REPO_ROOT,
+            cwd=str(cwd or REPO_ROOT),
             text=True,
             timeout=timeout_seconds
         )
@@ -161,9 +167,87 @@ def derive_profile_name(app_user_id: str) -> str:
     return f"hcuser{digest[:24]}"
 
 
+def get_profile_dir(profile_name: str) -> Path:
+    return Path.home() / ".hermes" / "profiles" / profile_name
+
+
+def get_profile_workspace(profile_name: str) -> Path:
+    return get_profile_dir(profile_name) / "workspace" / "hermes-chat"
+
+
+def ensure_profile_honcho_disabled(profile_name: str) -> None:
+    profile_dir = get_profile_dir(profile_name)
+    config_path = profile_dir / "config.yaml"
+    honcho_config_path = profile_dir / "honcho.json"
+
+    honcho_config_path.write_text(
+        json.dumps({"enabled": False}, indent=2) + "\n",
+        encoding="utf-8"
+    )
+
+    if not config_path.is_file():
+        return
+
+    text = config_path.read_text(encoding="utf-8")
+    replacement = "honcho:\n  enabled: false"
+
+    if re.search(r"(?m)^honcho:\s*\{\}\s*$", text):
+        updated = re.sub(r"(?m)^honcho:\s*\{\}\s*$", replacement, text, count=1)
+    elif re.search(r"(?m)^honcho:\s*$", text):
+        lines = text.splitlines()
+        updated_lines: list[str] = []
+        index = 0
+
+        while index < len(lines):
+            line = lines[index]
+            updated_lines.append(line)
+
+            if line == "honcho:":
+                block_start = len(updated_lines)
+                index += 1
+                block_end = index
+
+                while block_end < len(lines):
+                    next_line = lines[block_end]
+                    if next_line and not next_line.startswith(" "):
+                        break
+                    updated_lines.append(next_line)
+                    block_end += 1
+
+                enabled_index = next(
+                    (
+                        position
+                        for position in range(block_start, len(updated_lines))
+                        if updated_lines[position].lstrip().startswith("enabled:")
+                    ),
+                    None
+                )
+
+                if enabled_index is None:
+                    updated_lines.insert(block_start, "  enabled: false")
+                else:
+                    updated_lines[enabled_index] = "  enabled: false"
+
+                index = block_end
+                continue
+
+            index += 1
+
+        updated = "\n".join(updated_lines)
+        if text.endswith("\n"):
+            updated += "\n"
+    else:
+        updated = text.rstrip() + "\n\nhoncho:\n  enabled: false\n"
+
+    if updated != text:
+        config_path.write_text(updated, encoding="utf-8")
+
+
 def ensure_profile_exists(profile_name: str) -> None:
     with _provision_lock:
         if profile_name in _provisioned_profiles:
+            get_profile_workspace(profile_name).mkdir(parents=True, exist_ok=True)
+            ensure_profile_honcho_disabled(profile_name)
             return
 
         command = get_hermes_command() + ["profile", "create", profile_name, "--no-alias"]
@@ -179,18 +263,31 @@ def ensure_profile_exists(profile_name: str) -> None:
         )
 
         if result.returncode == 0:
+            get_profile_workspace(profile_name).mkdir(parents=True, exist_ok=True)
+            ensure_profile_honcho_disabled(profile_name)
             _provisioned_profiles.add(profile_name)
             return
 
         detail = command_output_detail(result)
 
         if "already exists" in detail.lower():
+            get_profile_workspace(profile_name).mkdir(parents=True, exist_ok=True)
+            ensure_profile_honcho_disabled(profile_name)
             _provisioned_profiles.add(profile_name)
             return
 
         raise BridgeError(
             f"Failed to provision Hermes profile '{profile_name}': {detail}"
         )
+
+
+def get_request_lock(lock_key: str) -> threading.Lock:
+    with _request_lock_registry_lock:
+        lock = _request_lock_registry.get(lock_key)
+        if lock is None:
+            lock = threading.Lock()
+            _request_lock_registry[lock_key] = lock
+        return lock
 
 
 def normalize_history_entry(index: int, entry: Any) -> dict[str, str]:
@@ -295,6 +392,8 @@ def run_chat(
 ) -> dict[str, str]:
     query = build_query(message, history if hermes_session_id is None else [])
     command = get_hermes_command() + ["-p", profile_name, "chat", "-Q", "-q", query]
+    workspace = get_profile_workspace(profile_name)
+    workspace.mkdir(parents=True, exist_ok=True)
 
     if hermes_session_id:
         command.extend(["--resume", hermes_session_id])
@@ -302,7 +401,8 @@ def run_chat(
     result = run_command(
         command,
         timeout_seconds=CHAT_TIMEOUT_SECONDS,
-        description="Hermes chat request"
+        description="Hermes chat request",
+        cwd=workspace
     )
 
     try:
@@ -352,7 +452,7 @@ class HermesBridgeHandler(BaseHTTPRequestHandler):
             payload = self.read_json_body()
             app_user_id = require_non_empty_string(payload, "app_user_id")
             require_non_empty_string(payload, "app_user_email")
-            require_non_empty_string(payload, "chat_id")
+            chat_id = require_non_empty_string(payload, "chat_id")
             message = require_non_empty_string(payload, "message")
 
             raw_session_id = payload.get("hermes_session_id")
@@ -382,12 +482,16 @@ class HermesBridgeHandler(BaseHTTPRequestHandler):
 
             profile_name = derive_profile_name(app_user_id)
             ensure_profile_exists(profile_name)
-            response_payload = run_chat(
-                profile_name=profile_name,
-                message=message,
-                hermes_session_id=hermes_session_id,
-                history=history
-            )
+            lock_key = hermes_session_id or f"{profile_name}:{chat_id}"
+
+            with get_request_lock(lock_key):
+                response_payload = run_chat(
+                    profile_name=profile_name,
+                    message=message,
+                    hermes_session_id=hermes_session_id,
+                    history=history
+                )
+
             self.write_json(HTTPStatus.OK, response_payload)
         except BridgeError as exc:
             self.write_json(exc.status, {"error": str(exc)})

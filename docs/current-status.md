@@ -25,6 +25,8 @@ adapter.
 - The Next.js backend now talks to a localhost-only Python bridge in
   `bridge/hermes_bridge.py`
 - The bridge lazily provisions one Hermes profile per authenticated app user
+- Bridge-managed profiles clone baseline config but explicitly disable Honcho so
+  they do not inherit the host's global peer memory
 - The bridge resumes one Hermes session per app chat and returns those IDs to
   the app for persistence
 - Users, sessions, chats, messages, Hermes profile names, and Hermes session

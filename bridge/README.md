@@ -29,9 +29,14 @@ It returns JSON with:
 - Lazily provisions one Hermes profile per app user.
 - Derives a deterministic safe profile name from `app_user_id`.
 - Uses `hermes profile create <name> --no-alias`.
-- Uses `--clone --clone-from <baseline>` only when
-  `HERMES_BRIDGE_BASELINE_PROFILE` is configured.
+- Uses `--clone --clone-from <baseline>` for new users.
+- Defaults that baseline to the existing `default` Hermes profile.
+- `HERMES_BRIDGE_BASELINE_PROFILE` can override the baseline profile name.
+- Writes a profile-local `honcho.json` with `{"enabled": false}` and patches
+  `config.yaml` so bridge-managed profiles do not inherit global Honcho context.
 - Runs one Hermes subprocess per request with `hermes -p <profile> chat -Q -q`.
+- Serializes requests per existing Hermes session, or per `(profile, chat)` before a
+  session exists, so overlapping sends do not fork session state.
 - Resumes existing Hermes sessions with `--resume`.
 
 ## Local Usage
