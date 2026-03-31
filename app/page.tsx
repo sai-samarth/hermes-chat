@@ -13,6 +13,7 @@ import type {
   ChatSummary,
   PersistedChatMessage
 } from "@/lib/chat-types";
+import { renderChatMarkdown } from "@/lib/chat-markdown";
 import { createSseParser, type ParsedSseEvent } from "@/lib/sse";
 
 const DEFAULT_CHAT_TITLE = "New chat";
@@ -75,7 +76,7 @@ type StreamErrorEvent = {
   error?: string;
 };
 
-type AuthMode="login" | "register";
+type AuthMode = "login" | "register";
 
 async function readJson<T>(response: Response): Promise<T | null> {
   return (await response.json().catch(() => null)) as T | null;
@@ -730,11 +731,13 @@ export default function Home() {
               </div>
             </div>
 
-            <h1 className="auth-title">A quieter place to think with Hermes.</h1>
-            <p className="auth-copy">
-              Your chats stay personal, persistent, and easy to return to.
-              Sign in to continue your workspace.
-            </p>
+            <div className="auth-copy-stack">
+              <h1 className="auth-title">A quieter place to think with Hermes.</h1>
+              <p className="auth-copy">
+                Your chats stay personal, persistent, and easy to return to.
+                Sign in to continue your workspace.
+              </p>
+            </div>
 
             <div className="auth-points" aria-label="Product benefits">
               <p>Private conversations on this machine</p>
@@ -770,7 +773,7 @@ export default function Home() {
             </div>
 
             <div className="auth-panel-copy">
-              <p className="eyebrow">Welcome</p>
+              <p className="eyebrow">Access</p>
               <h2>
                 {authMode === "login"
                   ? "Return to your workspace"
@@ -821,7 +824,7 @@ export default function Home() {
               ) : (
                 <p className="auth-status" aria-live="polite">
                   {sessionState === "loading"
-                    ? "Checking your session..."
+                    ? "Getting things ready..."
                     : authMode === "login"
                       ? "Use the email and password for this workspace."
                       : "Use at least 8 characters for your password."}
@@ -873,7 +876,7 @@ export default function Home() {
 
               <button
                 type="button"
-                className="sidebar-action"
+                className="sidebar-action sidebar-action-primary"
                 onClick={handleCreateChat}
                 disabled={sidebarBusy}
               >
@@ -993,16 +996,25 @@ export default function Home() {
                 className={`message message-${message.role}`}
               >
                 <div className="message-meta">
-                  <span>{getMessageAuthor(message.role)}</span>
+                  <div className="message-identity">
+                    {message.role === "assistant" ? (
+                      <span className="message-avatar" aria-hidden="true">
+                        H
+                      </span>
+                    ) : null}
+                    <span>{getMessageAuthor(message.role)}</span>
+                  </div>
                   <span>{formatMessageTime(message.createdAt)}</span>
                 </div>
 
-                <p className="message-copy">
-                  {message.content ||
-                    (message.role === "assistant" && isSending
-                      ? "Thinking…"
-                      : "")}
-                </p>
+                <div className="message-copy">
+                  {renderChatMarkdown(
+                    message.content ||
+                      (message.role === "assistant" && isSending
+                        ? "Thinking…"
+                        : "")
+                  )}
+                </div>
               </article>
             ))}
 

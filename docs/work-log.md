@@ -111,3 +111,19 @@ UI cleanup pass:
 - Replaced noisy transcript/composer status language with shorter, calmer UI
   text.
 - Re-ran `npm run lint` and `npm run build` after the UI pass.
+
+UI polish pass from review feedback:
+
+- Tightened the landing layout so the hero copy, auth card, and page width feel
+  more cohesive on wide screens.
+- Strengthened the active auth toggle state and added a subtler background grid
+  treatment so the page feels less empty without becoming noisy.
+- Promoted the sidebar `New chat` action into a clearer full-width primary
+  button.
+- Improved sidebar preview truncation with a two-line clamp.
+- Added lightweight markdown-style rendering for assistant responses, including
+  section labels, lists, inline code, bold text, and fenced code blocks.
+- Added a simple Hermes avatar treatment on assistant messages and cleaned up
+  message identity/timestamp presentation.
+- Kept the composer anchored to the bottom of the workspace shell for a more
+  stable chat layout.
