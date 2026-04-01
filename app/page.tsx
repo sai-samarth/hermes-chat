@@ -255,7 +255,6 @@ export default function Home() {
   const [isCompactViewport, setIsCompactViewport] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [renamingChat, setRenamingChat] = useState<{id: string; title: string} | null>(null);
-  const [isDeletingChat, setIsDeletingChat] = useState<string | null>(null);
 
   const transcriptRef = useRef<HTMLDivElement>(null);
   const composerFormRef = useRef<HTMLFormElement>(null);
@@ -664,7 +663,6 @@ export default function Home() {
         setSelectedChatId(null);
         setMessages([]);
       }
-      setIsDeletingChat(null);
     } catch (error) {
       setComposerError(
         error instanceof Error ? error.message : "Could not delete chat."
@@ -1042,58 +1040,82 @@ export default function Home() {
               {isSidebarOpen && <div className="thread-group-label">{group.label}</div>}
               <ul className="thread-group-list">
                 {group.chats.map((chat) => (
-                  <li key={chat.id} className="thread-item-wrapper">
-                    <button
-                      type="button"
-                      className={`thread-item${chat.id === selectedChatId ? ' thread-item-active' : ''}${isSidebarOpen ? '' : ' thread-item-collapsed'}`}
-                      onClick={() => {
-                        if (isCompactViewport) setIsSidebarOpen(false);
-                        void loadChat(chat.id);
-                      }}
-                      disabled={sidebarBusy || chat.id === selectedChatId}
-                      title={chat.title}
-                    >
-                      {isSidebarOpen ? (
-                        <span className="thread-item-title">{chat.title}</span>
-                      ) : (
-                        <span style={{fontSize: '11px'}}>{chat.title.slice(0, 2)}</span>
-                      )}
-                    </button>
-                    {isSidebarOpen && (
-                      <div className="thread-item-actions">
+                  <li key={chat.id}>
+                    {renamingChat?.id === chat.id ? (
+                      <form
+                        className="thread-item-rename-form"
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          void handleRenameChat(chat.id, renamingChat.title);
+                        }}
+                      >
+                        <input
+                          type="text"
+                          className="thread-item-rename-input"
+                          value={renamingChat.title}
+                          onChange={(e) => setRenamingChat({id: chat.id, title: e.target.value})}
+                          autoFocus
+                          onBlur={() => setRenamingChat(null)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Escape') {
+                              setRenamingChat(null);
+                            }
+                          }}
+                        />
+                      </form>
+                    ) : (
+                      <div className={`thread-item-row${chat.id === selectedChatId ? ' thread-item-row-active' : ''}`}>
                         <button
                           type="button"
-                          className="thread-item-action-btn"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setRenamingChat({id: chat.id, title: chat.title});
+                          className={`thread-item${isSidebarOpen ? '' : ' thread-item-collapsed'}`}
+                          onClick={() => {
+                            if (isCompactViewport) setIsSidebarOpen(false);
+                            void loadChat(chat.id);
                           }}
-                          disabled={sidebarBusy}
-                          title="Rename"
-                          aria-label="Rename chat"
+                          disabled={sidebarBusy || chat.id === selectedChatId}
+                          title={chat.title}
                         >
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
-                          </svg>
+                          {isSidebarOpen ? (
+                            <span className="thread-item-title">{chat.title}</span>
+                          ) : (
+                            <span style={{fontSize: '11px'}}>{chat.title.slice(0, 2)}</span>
+                          )}
                         </button>
-                        <button
-                          type="button"
-                          className="thread-item-action-btn thread-item-action-btn-danger"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setIsDeletingChat(chat.id);
-                          }}
-                          disabled={sidebarBusy}
-                          title="Delete"
-                          aria-label="Delete chat"
-                        >
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <polyline points="3 6 5 6 21 6"/>
-                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                            <line x1="10" y1="11" x2="10" y2="17"/>
-                            <line x1="14" y1="11" x2="14" y2="17"/>
-                          </svg>
-                        </button>
+                        {isSidebarOpen && (
+                          <div className="thread-item-actions">
+                            <button
+                              type="button"
+                              className="thread-item-action-btn"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setRenamingChat({id: chat.id, title: chat.title});
+                              }}
+                              disabled={sidebarBusy}
+                              title="Rename"
+                            >
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
+                              </svg>
+                            </button>
+                            <button
+                              type="button"
+                              className="thread-item-action-btn thread-item-action-btn-danger"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void handleDeleteChat(chat.id);
+                              }}
+                              disabled={sidebarBusy}
+                              title="Delete"
+                            >
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <polyline points="3 6 5 6 21 6"/>
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                                <line x1="10" y1="11" x2="10" y2="17"/>
+                                <line x1="14" y1="11" x2="14" y2="17"/>
+                              </svg>
+                            </button>
+                          </div>
+                        )}
                       </div>
                     )}
                   </li>
@@ -1277,73 +1299,6 @@ export default function Home() {
           </div>
         </footer>
       </section>
-
-      {/* Rename Modal */}
-      {renamingChat && (
-        <div className="modal-overlay" onClick={() => setRenamingChat(null)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3 className="modal-title">Rename chat</h3>
-            <input
-              type="text"
-              className="modal-input"
-              value={renamingChat.title}
-              onChange={(e) => setRenamingChat({...renamingChat, title: e.target.value})}
-              placeholder="Chat title"
-              autoFocus
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  void handleRenameChat(renamingChat.id, renamingChat.title);
-                } else if (e.key === 'Escape') {
-                  setRenamingChat(null);
-                }
-              }}
-            />
-            <div className="modal-actions">
-              <button
-                type="button"
-                className="modal-btn modal-btn-secondary"
-                onClick={() => setRenamingChat(null)}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="modal-btn modal-btn-primary"
-                onClick={() => void handleRenameChat(renamingChat.id, renamingChat.title)}
-                disabled={!renamingChat.title.trim()}
-              >
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Delete Confirmation Modal */}
-      {isDeletingChat && (
-        <div className="modal-overlay" onClick={() => setIsDeletingChat(null)}>
-          <div className="modal modal-small" onClick={(e) => e.stopPropagation()}>
-            <h3 className="modal-title">Delete chat?</h3>
-            <p className="modal-text">This cannot be undone.</p>
-            <div className="modal-actions">
-              <button
-                type="button"
-                className="modal-btn modal-btn-secondary"
-                onClick={() => setIsDeletingChat(null)}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="modal-btn modal-btn-danger"
-                onClick={() => void handleDeleteChat(isDeletingChat)}
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
