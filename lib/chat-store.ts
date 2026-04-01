@@ -597,34 +597,8 @@ export function deleteChat(userId: string, chatId: string) {
 
   const db = getDb();
 
-  // Delete attachments first (cascade would handle this, but explicit is safer)
-  db.prepare(
-    `
-      delete from message_attachments
-      where message_id in (
-        select id from messages where chat_id = ?
-      )
-      and owner_user_id = ?
-    `
-  ).run(chatId, userId);
-
-  // Delete messages
-  db.prepare(
-    `
-      delete from messages
-      where chat_id = ?
-    `
-  ).run(chatId);
-
-  // Delete chat_hermes_sessions
-  db.prepare(
-    `
-      delete from chat_hermes_sessions
-      where chat_id = ?
-    `
-  ).run(chatId);
-
-  // Delete the chat
+  // Use cascading delete - foreign keys with on delete cascade handle the rest
+  // Just delete the chat and let SQLite handle messages, attachments, etc.
   db.prepare(
     `
       delete from chats
