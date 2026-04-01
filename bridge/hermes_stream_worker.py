@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+from datetime import datetime
 import json
 import os
 import sys
@@ -141,7 +142,94 @@ def main() -> int:
         cli.agent.stream_delta_callback = (
             lambda delta: emit({"type": "delta", "delta": delta}) if delta else None
         )
-        cli.agent.tool_gen_callback = None
+
+        # Monkey-patch tool execution to emit events
+        # Store reference to unbound original method to avoid recursion
+        import types
+        _original_sequential = type(cli.agent)._execute_tool_calls_sequential
+        _active_tool_calls: dict[str, dict] = {}
+
+        def _patched_execute_sequential(self, assistant_message, messages, effective_task_id, api_call_count=0):
+            """Wrapped version that emits tool_start/tool_complete/tool_error events."""
+            import time
+
+            for i, tool_call in enumerate(assistant_message.tool_calls):
+                if getattr(self, '_interrupt_requested', False):
+                    break
+
+                tool_id = getattr(tool_call, 'id', f"call_{i}")
+                function_name = tool_call.function.name
+                try:
+                    import json as _json
+                    function_args = _json.loads(tool_call.function.arguments)
+                except Exception:
+                    function_args = {}
+
+                # Emit tool_start
+                started_at = datetime.now().isoformat()
+                _active_tool_calls[tool_id] = {
+                    "id": tool_id,
+                    "name": function_name,
+                    "arguments": function_args,
+                    "started_at": started_at
+                }
+                emit({
+                    "type": "tool_start",
+                    "id": tool_id,
+                    "name": function_name,
+                    "arguments": function_args,
+                    "timestamp": started_at
+                })
+
+                # Create a single-tool message wrapper
+                single_wrapper = type('obj', (object,), {'tool_calls': [tool_call]})()
+
+                tool_start_time = time.time()
+                try:
+                    # Call original UNBOUND method with self explicitly
+                    _original_sequential(self, single_wrapper, messages, effective_task_id, api_call_count)
+                    tool_duration = int((time.time() - tool_start_time) * 1000)
+
+                    # Get result from last tool message
+                    result = None
+                    if messages and messages[-1].get("role") == "tool":
+                        try:
+                            content = messages[-1].get("content", "")
+                            if content.startswith('{'):
+                                result = _json.loads(content)
+                            else:
+                                result = {"output": content}
+                        except Exception:
+                            result = {"output": str(messages[-1].get("content", ""))}
+
+                    completed_at = datetime.now().isoformat()
+                    emit({
+                        "type": "tool_complete",
+                        "id": tool_id,
+                        "result": result,
+                        "timestamp": completed_at,
+                        "duration_ms": tool_duration
+                    })
+                except Exception as e:
+                    completed_at = datetime.now().isoformat()
+                    emit({
+                        "type": "tool_error",
+                        "id": tool_id,
+                        "error": str(e),
+                        "timestamp": completed_at
+                    })
+
+        # Bind the patched method to the instance
+        cli.agent._execute_tool_calls_sequential = types.MethodType(_patched_execute_sequential, cli.agent)
+
+        # Force sequential execution to ensure proper tool event ordering
+        # (concurrent execution makes event correlation complex)
+        def _force_sequential(assistant_message, messages, effective_task_id, api_call_count=0):
+            """Always use sequential execution for proper event tracking."""
+            return cli.agent._execute_tool_calls_sequential(
+                assistant_message, messages, effective_task_id, api_call_count
+            )
+        cli.agent._execute_tool_calls_concurrent = _force_sequential
 
         result = cli.agent.run_conversation(
             user_message=message,

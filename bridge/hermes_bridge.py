@@ -656,6 +656,32 @@ class HermesBridgeHandler(BaseHTTPRequestHandler):
                             self.write_sse_event("delta", {"text": delta})
                         continue
 
+                    if event_type == "tool_start":
+                        self.write_sse_event("tool_start", {
+                            "id": event.get("id", ""),
+                            "name": event.get("name", ""),
+                            "arguments": event.get("arguments", {}),
+                            "timestamp": event.get("timestamp", "")
+                        })
+                        continue
+
+                    if event_type == "tool_complete":
+                        self.write_sse_event("tool_complete", {
+                            "id": event.get("id", ""),
+                            "result": event.get("result"),
+                            "timestamp": event.get("timestamp", ""),
+                            "duration_ms": event.get("duration_ms", 0)
+                        })
+                        continue
+
+                    if event_type == "tool_error":
+                        self.write_sse_event("tool_error", {
+                            "id": event.get("id", ""),
+                            "error": event.get("error", ""),
+                            "timestamp": event.get("timestamp", "")
+                        })
+                        continue
+
                     if event_type == "done":
                         self.write_sse_event(
                             "done",
