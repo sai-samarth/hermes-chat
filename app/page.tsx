@@ -254,6 +254,9 @@ export default function Home() {
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [isCompactViewport, setIsCompactViewport] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [activeChatMenu, setActiveChatMenu] = useState<string | null>(null);
+  const [renamingChat, setRenamingChat] = useState<{id: string; title: string} | null>(null);
+  const [isDeletingChat, setIsDeletingChat] = useState<string | null>(null);
 
   const transcriptRef = useRef<HTMLDivElement>(null);
   const composerFormRef = useRef<HTMLFormElement>(null);
@@ -617,6 +620,57 @@ export default function Home() {
       );
     } finally {
       setIsCreatingChat(false);
+    }
+  }
+
+  async function handleRenameChat(chatId: string, newTitle: string) {
+    if (!newTitle.trim()) return;
+    try {
+      const response = await fetch(`/api/chats/${encodeURIComponent(chatId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: newTitle.trim() })
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to rename chat");
+      }
+
+      const updatedChat = (await response.json()) as ChatSummary;
+      setChats((prev) =>
+        prev.map((c) =>
+          c.id === updatedChat.id ? { ...c, title: updatedChat.title } : c
+        )
+      );
+      setRenamingChat(null);
+    } catch (error) {
+      setComposerError(
+        error instanceof Error ? error.message : "Could not rename chat."
+      );
+    }
+  }
+
+  async function handleDeleteChat(chatId: string) {
+    try {
+      const response = await fetch(`/api/chats/${encodeURIComponent(chatId)}`, {
+        method: "DELETE"
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to delete chat");
+      }
+
+      setChats((prev) => prev.filter((c) => c.id !== chatId));
+      if (selectedChatId === chatId) {
+        setSelectedChatId(null);
+        setMessages([]);
+      }
+      setIsDeletingChat(null);
+      setActiveChatMenu(null);
+    } catch (error) {
+      setComposerError(
+        error instanceof Error ? error.message : "Could not delete chat."
+      );
     }
   }
 
@@ -990,7 +1044,7 @@ export default function Home() {
               {isSidebarOpen && <div className="thread-group-label">{group.label}</div>}
               <ul className="thread-group-list">
                 {group.chats.map((chat) => (
-                  <li key={chat.id}>
+                  <li key={chat.id} className="thread-item-wrapper">
                     <button
                       type="button"
                       className={`thread-item${chat.id === selectedChatId ? ' thread-item-active' : ''}${isSidebarOpen ? '' : ' thread-item-collapsed'}`}
@@ -1002,11 +1056,53 @@ export default function Home() {
                       title={chat.title}
                     >
                       {isSidebarOpen ? (
-                        <>{chat.title}</>
+                        <span className="thread-item-title">{chat.title}</span>
                       ) : (
                         <span style={{fontSize: '11px'}}>{chat.title.slice(0, 2)}</span>
                       )}
                     </button>
+                    {isSidebarOpen && (
+                      <button
+                        type="button"
+                        className="thread-item-menu-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveChatMenu(activeChatMenu === chat.id ? null : chat.id);
+                        }}
+                        disabled={sidebarBusy}
+                        aria-label="Chat options"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <circle cx="12" cy="5" r="2"/>
+                          <circle cx="12" cy="12" r="2"/>
+                          <circle cx="12" cy="19" r="2"/>
+                        </svg>
+                      </button>
+                    )}
+                    {activeChatMenu === chat.id && isSidebarOpen && (
+                      <div className="thread-item-menu">
+                        <button
+                          type="button"
+                          className="thread-item-menu-item"
+                          onClick={() => {
+                            setRenamingChat({id: chat.id, title: chat.title});
+                            setActiveChatMenu(null);
+                          }}
+                        >
+                          Rename
+                        </button>
+                        <button
+                          type="button"
+                          className="thread-item-menu-item thread-item-menu-item-danger"
+                          onClick={() => {
+                            setIsDeletingChat(chat.id);
+                            setActiveChatMenu(null);
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -1188,6 +1284,73 @@ export default function Home() {
           </div>
         </footer>
       </section>
+
+      {/* Rename Modal */}
+      {renamingChat && (
+        <div className="modal-overlay" onClick={() => setRenamingChat(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3 className="modal-title">Rename chat</h3>
+            <input
+              type="text"
+              className="modal-input"
+              value={renamingChat.title}
+              onChange={(e) => setRenamingChat({...renamingChat, title: e.target.value})}
+              placeholder="Chat title"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  void handleRenameChat(renamingChat.id, renamingChat.title);
+                } else if (e.key === 'Escape') {
+                  setRenamingChat(null);
+                }
+              }}
+            />
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="modal-btn modal-btn-secondary"
+                onClick={() => setRenamingChat(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="modal-btn modal-btn-primary"
+                onClick={() => void handleRenameChat(renamingChat.id, renamingChat.title)}
+                disabled={!renamingChat.title.trim()}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {isDeletingChat && (
+        <div className="modal-overlay" onClick={() => setIsDeletingChat(null)}>
+          <div className="modal modal-small" onClick={(e) => e.stopPropagation()}>
+            <h3 className="modal-title">Delete chat?</h3>
+            <p className="modal-text">This cannot be undone.</p>
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="modal-btn modal-btn-secondary"
+                onClick={() => setIsDeletingChat(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="modal-btn modal-btn-danger"
+                onClick={() => void handleDeleteChat(isDeletingChat)}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

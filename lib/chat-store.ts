@@ -561,3 +561,74 @@ export function listMessagesForHermes(
 
   return rows;
 }
+
+export function updateChat(userId: string, chatId: string, title: string) {
+  const normalizedTitle = normalizeWhitespace(title);
+
+  if (!normalizedTitle) {
+    throw new ChatStoreError("Title cannot be empty.", 400);
+  }
+
+  if (normalizedTitle.length > MAX_CHAT_TITLE_LENGTH) {
+    throw new ChatStoreError(
+      `Title exceeds ${MAX_CHAT_TITLE_LENGTH} characters.`,
+      400
+    );
+  }
+
+  assertOwnedChatExists(userId, chatId);
+
+  const db = getDb();
+  const timestamp = new Date().toISOString();
+
+  db.prepare(
+    `
+      update chats
+      set title = ?, updated_at = ?
+      where id = ? and owner_user_id = ?
+    `
+  ).run(normalizedTitle, timestamp, chatId, userId);
+
+  return getChatSummary(userId, chatId);
+}
+
+export function deleteChat(userId: string, chatId: string) {
+  assertOwnedChatExists(userId, chatId);
+
+  const db = getDb();
+
+  // Delete attachments first (cascade would handle this, but explicit is safer)
+  db.prepare(
+    `
+      delete from message_attachments
+      where message_id in (
+        select id from messages where chat_id = ?
+      )
+      and owner_user_id = ?
+    `
+  ).run(chatId, userId);
+
+  // Delete messages
+  db.prepare(
+    `
+      delete from messages
+      where chat_id = ?
+    `
+  ).run(chatId);
+
+  // Delete chat_hermes_sessions
+  db.prepare(
+    `
+      delete from chat_hermes_sessions
+      where chat_id = ?
+    `
+  ).run(chatId);
+
+  // Delete the chat
+  db.prepare(
+    `
+      delete from chats
+      where id = ? and owner_user_id = ?
+    `
+  ).run(chatId, userId);
+}
