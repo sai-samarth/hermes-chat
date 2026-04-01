@@ -1526,21 +1526,11 @@ export default function Home() {
             {/* Messages */}
             {messages.map((message) => (
               <article key={message.id} className={`message message-${message.role}`}>
-                <div className="message-header">
-                  <div className={`message-avatar message-avatar-${message.role}`}>
-                    {message.role === 'assistant' ? 'H' : 'Y'}
-                  </div>
-                  <span className="message-role">
-                    {message.role === 'assistant' ? 'Hermes' : 'You'}
-                  </span>
-                </div>
                 {message.toolCalls && message.toolCalls.length > 0 && (
                   <ToolCallList toolCalls={message.toolCalls} />
                 )}
                 <div className="message-content">
-                  {renderChatMarkdown(
-                    message.content || (message.role === 'assistant' && isSending ? 'Thinking...' : '')
-                  )}
+                  {renderChatMarkdown(message.content || '')}
                 </div>
                 {message.attachments.length > 0 && (
                   <div className="attachment-list">
@@ -1559,6 +1549,16 @@ export default function Home() {
                 )}
               </article>
             ))}
+            {/* Loading state - show when sending and last message has no content yet */}
+            {isSending && messages.length > 0 && messages[messages.length - 1].role === 'assistant' && !messages[messages.length - 1].content && (
+              <article className="message message-loading">
+                <div className="loading-dots">
+                  <span />
+                  <span />
+                  <span />
+                </div>
+              </article>
+            )}
           </div>
         </div>
 
