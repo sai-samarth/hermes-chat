@@ -6,11 +6,14 @@ import {
   useMemo,
   useRef,
   useState,
+  type ChangeEvent,
   type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent
 } from "react";
 
+import { composerFileAccept } from "@/lib/attachment-types";
 import type {
+  ChatAttachment,
   ChatDetail,
   ChatSummary,
   PersistedChatMessage
@@ -99,6 +102,42 @@ type ChatGroup = {
   label: string;
   chats: ChatSummary[];
 };
+
+type PendingAttachment = {
+  file: File;
+  id: string;
+  kind: ChatAttachment["kind"];
+  mediaType: string;
+  sizeBytes: number;
+};
+
+function inferAttachmentKind(file: File): ChatAttachment["kind"] {
+  return file.type.startsWith("image/") ? "image" : "document";
+}
+
+function formatAttachmentCount(count: number) {
+  return `${count} ${count === 1 ? "file" : "files"}`;
+}
+
+function buildAttachmentOnlyLabel(attachments: Array<{ filename: string }>) {
+  if (attachments.length === 1) {
+    return `Attached: ${attachments[0]?.filename ?? "file"}`;
+  }
+
+  return `Attached ${attachments.length} files`;
+}
+
+function formatFileSize(sizeBytes: number) {
+  if (sizeBytes < 1024) {
+    return `${sizeBytes} B`;
+  }
+
+  if (sizeBytes < 1024 * 1024) {
+    return `${(sizeBytes / 1024).toFixed(1)} KB`;
+  }
+
+  return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 async function readJson<T>(response: Response): Promise<T | null> {
   return (await response.json().catch(() => null)) as T | null;
@@ -296,10 +335,12 @@ export default function Home() {
   const [isSending, setIsSending] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [composerError, setComposerError] = useState<string | null>(null);
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
 
   const transcriptRef = useRef<HTMLDivElement>(null);
   const composerFormRef = useRef<HTMLFormElement>(null);
   const composerInputRef = useRef<HTMLTextAreaElement>(null);
+  const composerFileInputRef = useRef<HTMLInputElement>(null);
 
   const isAuthenticated =
     sessionState === "authenticated" && sessionUser !== null;
@@ -337,6 +378,7 @@ export default function Home() {
     setIsSending(false);
     setLoadError(null);
     setComposerError(null);
+    setPendingAttachments([]);
   }, []);
 
   const moveToSignedOut = useCallback((message?: string) => {
@@ -647,6 +689,51 @@ export default function Home() {
     }
   }
 
+  function handleAttachmentInputChange(event: ChangeEvent<HTMLInputElement>) {
+    const nextFiles = Array.from(event.target.files ?? []);
+
+    if (nextFiles.length === 0) {
+      return;
+    }
+
+    setComposerError(null);
+    setPendingAttachments((currentAttachments) => {
+      const existingKeys = new Set(
+        currentAttachments.map((attachment) =>
+          `${attachment.file.name}:${attachment.file.size}:${attachment.file.lastModified}`
+        )
+      );
+      const nextAttachments = [...currentAttachments];
+
+      for (const file of nextFiles) {
+        const key = `${file.name}:${file.size}:${file.lastModified}`;
+
+        if (existingKeys.has(key)) {
+          continue;
+        }
+
+        existingKeys.add(key);
+        nextAttachments.push({
+          id: crypto.randomUUID(),
+          file,
+          kind: inferAttachmentKind(file),
+          mediaType: file.type,
+          sizeBytes: file.size
+        });
+      }
+
+      return nextAttachments;
+    });
+
+    event.target.value = "";
+  }
+
+  function handleRemovePendingAttachment(attachmentId: string) {
+    setPendingAttachments((currentAttachments) =>
+      currentAttachments.filter((attachment) => attachment.id !== attachmentId)
+    );
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -655,32 +742,48 @@ export default function Home() {
     }
 
     const content = draft.trim();
+    const attachmentsForSend = [...pendingAttachments];
 
-    if (!content) {
+    if (!content && attachmentsForSend.length === 0) {
       return;
     }
 
+    const visibleContent =
+      content ||
+      buildAttachmentOnlyLabel(
+        attachmentsForSend.map((attachment) => ({ filename: attachment.file.name }))
+      );
     const submittedAt = new Date().toISOString();
     const optimisticMessage: PersistedChatMessage = {
       id: crypto.randomUUID(),
       role: "user",
-      content,
+      content: visibleContent,
+      attachments: attachmentsForSend.map((attachment) => ({
+        id: attachment.id,
+        filename: attachment.file.name,
+        kind: attachment.kind,
+        mediaType: attachment.mediaType,
+        sizeBytes: attachment.sizeBytes,
+        url: ""
+      })),
       createdAt: submittedAt
     };
     const optimisticAssistantMessage: PersistedChatMessage = {
       id: crypto.randomUUID(),
       role: "assistant",
       content: "",
+      attachments: [],
       createdAt: submittedAt
     };
+    const optimisticPreview = buildPreview(visibleContent);
     const optimisticChat: ChatSummary = {
       ...currentChat,
       title:
         currentChat.messageCount === 0 && currentChat.title === DEFAULT_CHAT_TITLE
-          ? buildChatTitle(content)
+          ? buildChatTitle(visibleContent)
           : currentChat.title,
       updatedAt: submittedAt,
-      lastMessagePreview: buildPreview(content),
+      lastMessagePreview: optimisticPreview,
       messageCount: currentChat.messageCount + 1
     };
 
@@ -691,20 +794,25 @@ export default function Home() {
     ]);
     setChats((currentChats) => upsertChat(currentChats, optimisticChat));
     setDraft("");
+    setPendingAttachments([]);
     setComposerError(null);
     setIsSending(true);
 
     try {
+      const formData = new FormData();
+      formData.set("chatId", selectedChatId);
+      formData.set("content", content);
+
+      attachmentsForSend.forEach((attachment) => {
+        formData.append("attachments", attachment.file);
+      });
+
       const response = await fetch("/api/chat?stream=1", {
         method: "POST",
         headers: {
-          Accept: "text/event-stream",
-          "Content-Type": "application/json"
+          Accept: "text/event-stream"
         },
-        body: JSON.stringify({
-          chatId: selectedChatId,
-          content
-        })
+        body: formData
       });
 
       if (response.status === 401) {
@@ -794,6 +902,8 @@ export default function Home() {
         throw new Error("The Hermes stream ended before completion.");
       }
     } catch (error) {
+      setDraft(content);
+      setPendingAttachments(attachmentsForSend);
       setMessages((currentMessages) =>
         removeMessage(currentMessages, optimisticAssistantMessage.id)
       );
@@ -1174,6 +1284,28 @@ export default function Home() {
                           : "")
                     )}
                   </div>
+
+                  {message.attachments.length > 0 ? (
+                    <div className="message-attachments" aria-label="Message attachments">
+                      {message.attachments.map((attachment) => (
+                        <a
+                          key={attachment.id}
+                          className="message-attachment-chip"
+                          href={attachment.url || undefined}
+                          target={attachment.url ? "_blank" : undefined}
+                          rel={attachment.url ? "noreferrer" : undefined}
+                        >
+                          <span className="message-attachment-kind">
+                            {attachment.kind === "image" ? "Image" : "File"}
+                          </span>
+                          <span className="message-attachment-name">{attachment.filename}</span>
+                          <span className="message-attachment-size">
+                            {formatFileSize(attachment.sizeBytes)}
+                          </span>
+                        </a>
+                      ))}
+                    </div>
+                  ) : null}
                 </article>
               ))}
             </div>
@@ -1187,9 +1319,59 @@ export default function Home() {
                 onSubmit={handleSubmit}
               >
                 <div className="composer-card">
-                  <label className="composer-label" htmlFor="chat-draft">
-                    Message Hermes
-                  </label>
+                  <div className="composer-heading-row">
+                    <label className="composer-label" htmlFor="chat-draft">
+                      Message Hermes
+                    </label>
+                    <input
+                      ref={composerFileInputRef}
+                      className="composer-file-input"
+                      type="file"
+                      name="attachments"
+                      multiple
+                      accept={composerFileAccept}
+                      onChange={handleAttachmentInputChange}
+                      disabled={composerBusy}
+                    />
+                    <button
+                      type="button"
+                      className="composer-attachment-button"
+                      onClick={() => composerFileInputRef.current?.click()}
+                      disabled={composerBusy}
+                    >
+                      Attach files
+                    </button>
+                  </div>
+
+                  {pendingAttachments.length > 0 ? (
+                    <div className="composer-attachments" aria-label="Pending attachments">
+                      {pendingAttachments.map((attachment) => (
+                        <div key={attachment.id} className="composer-attachment-pill">
+                          <div className="composer-attachment-copy">
+                            <span className="composer-attachment-kind">
+                              {attachment.kind === "image" ? "Image" : "File"}
+                            </span>
+                            <span className="composer-attachment-name">
+                              {attachment.file.name}
+                            </span>
+                            <span className="composer-attachment-size">
+                              {formatFileSize(attachment.sizeBytes)}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            className="composer-attachment-remove"
+                            onClick={() => handleRemovePendingAttachment(attachment.id)}
+                            disabled={composerBusy}
+                            aria-label={`Remove ${attachment.file.name}`}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+
                   <textarea
                     ref={composerInputRef}
                     id="chat-draft"
@@ -1206,7 +1388,7 @@ export default function Home() {
                   <div className="composer-footer-row">
                     <div className="composer-footnotes">
                       <p className="composer-copy">
-                        Keep it short, or paste a full prompt.
+                        Attach images, PDFs, DOCX, XLSX, PPTX, and common text files.
                       </p>
                       <p className="composer-shortcut">
                         Enter to send, Shift+Enter for newline
@@ -1219,13 +1401,15 @@ export default function Home() {
                         aria-live="polite"
                         role={composerError ? "alert" : undefined}
                       >
-                        {composerStatus}
+                        {pendingAttachments.length > 0
+                          ? `${composerStatus} · ${formatAttachmentCount(pendingAttachments.length)}`
+                          : composerStatus}
                       </span>
 
                       <button
                         className="composer-button"
                         type="submit"
-                        disabled={composerBusy || draft.trim().length === 0}
+                        disabled={composerBusy || (draft.trim().length === 0 && pendingAttachments.length === 0)}
                         aria-label={isSending ? "Sending" : "Send message"}
                       >
                         <span aria-hidden="true">↑</span>

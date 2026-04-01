@@ -2,7 +2,9 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 
+import type { ChatAttachmentKind } from "@/lib/attachment-types";
 import type {
+  ChatAttachment,
   ChatDetail,
   ChatMessage,
   ChatMessageRole,
@@ -25,6 +27,23 @@ type MessageRow = {
   created_at: string;
   id: string;
   role: ChatMessageRole;
+};
+
+type MessageAttachmentRow = {
+  filename: string;
+  id: string;
+  kind: ChatAttachmentKind;
+  media_type: string;
+  message_id: string;
+  size_bytes: number;
+};
+
+type StoredAttachmentInput = {
+  filename: string;
+  kind: ChatAttachmentKind;
+  mediaType: string;
+  sizeBytes: number;
+  storagePath: string;
 };
 
 type ChatHermesSessionRow = {
@@ -89,6 +108,10 @@ function normalizeStoredChatTitle(title?: string) {
     .trimEnd()}...`;
 }
 
+function buildAttachmentUrl(attachmentId: string) {
+  return `/api/attachments/${attachmentId}`;
+}
+
 function mapChatSummary(row: ChatSummaryRow): ChatSummary {
   return {
     id: row.id,
@@ -100,11 +123,26 @@ function mapChatSummary(row: ChatSummaryRow): ChatSummary {
   };
 }
 
-function mapPersistedMessage(row: MessageRow): PersistedChatMessage {
+function mapAttachmentRow(row: MessageAttachmentRow): ChatAttachment {
+  return {
+    id: row.id,
+    filename: row.filename,
+    kind: row.kind,
+    mediaType: row.media_type,
+    sizeBytes: Number(row.size_bytes),
+    url: buildAttachmentUrl(row.id)
+  };
+}
+
+function mapPersistedMessage(
+  row: MessageRow,
+  attachmentsByMessageId: Map<string, ChatAttachment[]>
+): PersistedChatMessage {
   return {
     id: row.id,
     role: row.role,
     content: row.content,
+    attachments: attachmentsByMessageId.get(row.id) ?? [],
     createdAt: row.created_at
   };
 }
@@ -174,6 +212,82 @@ function createChatInternal(userId: string, title = DEFAULT_CHAT_TITLE) {
   return chatId;
 }
 
+function getAttachmentsForMessageIds(userId: string, messageIds: string[]) {
+  if (messageIds.length === 0) {
+    return new Map<string, ChatAttachment[]>();
+  }
+
+  const db = getDb();
+  const placeholders = messageIds.map(() => "?").join(", ");
+  const rows = db
+    .prepare(
+      `
+        select
+          id,
+          message_id,
+          filename,
+          media_type,
+          kind,
+          size_bytes
+        from message_attachments
+        where owner_user_id = ?
+          and message_id in (${placeholders})
+        order by created_at asc, id asc
+      `
+    )
+    .all(userId, ...messageIds) as MessageAttachmentRow[];
+
+  const attachmentsByMessageId = new Map<string, ChatAttachment[]>();
+
+  for (const row of rows) {
+    const current = attachmentsByMessageId.get(row.message_id) ?? [];
+    current.push(mapAttachmentRow(row));
+    attachmentsByMessageId.set(row.message_id, current);
+  }
+
+  return attachmentsByMessageId;
+}
+
+export function getAttachmentDownload(
+  userId: string,
+  attachmentId: string
+): (StoredAttachmentInput & { id: string }) | null {
+  const db = getDb();
+  const row = db
+    .prepare(
+      `
+        select id, filename, kind, media_type, size_bytes, storage_path
+        from message_attachments
+        where id = ?
+          and owner_user_id = ?
+        limit 1
+      `
+    )
+    .get(attachmentId, userId) as
+    | {
+        filename: string;
+        id: string;
+        kind: ChatAttachmentKind;
+        media_type: string;
+        size_bytes: number;
+        storage_path: string;
+      }
+    | undefined;
+
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    filename: row.filename,
+    kind: row.kind,
+    mediaType: row.media_type,
+    sizeBytes: Number(row.size_bytes),
+    storagePath: row.storage_path
+  };
+}
+
 export function listChats(userId: string): ChatSummary[] {
   const db = getDb();
   const rows = db
@@ -214,7 +328,7 @@ export function getChat(userId: string, chatId: string): ChatDetail | null {
   }
 
   const db = getDb();
-  const messages = db
+  const messageRows = db
     .prepare(
       `
         select m.id, m.role, m.content, m.created_at
@@ -227,9 +341,14 @@ export function getChat(userId: string, chatId: string): ChatDetail | null {
     )
     .all(chatId, userId) as MessageRow[];
 
+  const attachmentsByMessageId = getAttachmentsForMessageIds(
+    userId,
+    messageRows.map((row) => row.id)
+  );
+
   return {
     chat,
-    messages: messages.map(mapPersistedMessage)
+    messages: messageRows.map((row) => mapPersistedMessage(row, attachmentsByMessageId))
   };
 }
 
@@ -247,11 +366,17 @@ export function createChat(userId: string, title?: string) {
 export function appendMessage(
   userId: string,
   chatId: string,
-  message: ChatMessage
+  message: ChatMessage,
+  options?: {
+    attachments?: StoredAttachmentInput[];
+    hermesContent?: string;
+  }
 ): PersistedChatMessage {
   const db = getDb();
   const messageId = randomUUID();
   const createdAt = new Date().toISOString();
+  const attachments = options?.attachments ?? [];
+  const hermesContent = options?.hermesContent?.trim() || null;
 
   const insertMessage = db.transaction(() => {
     const chatRow = db
@@ -275,10 +400,52 @@ export function appendMessage(
 
     db.prepare(
       `
-        insert into messages (id, chat_id, role, content, created_at)
-        values (?, ?, ?, ?, ?)
+        insert into messages (id, chat_id, role, content, hermes_content, created_at)
+        values (?, ?, ?, ?, ?, ?)
       `
-    ).run(messageId, chatId, message.role, message.content, createdAt);
+    ).run(
+      messageId,
+      chatId,
+      message.role,
+      message.content,
+      hermesContent,
+      createdAt
+    );
+
+    if (attachments.length > 0) {
+      const insertAttachment = db.prepare(
+        `
+          insert into message_attachments (
+            id,
+            message_id,
+            chat_id,
+            owner_user_id,
+            filename,
+            media_type,
+            kind,
+            size_bytes,
+            storage_path,
+            created_at
+          )
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `
+      );
+
+      for (const attachment of attachments) {
+        insertAttachment.run(
+          randomUUID(),
+          messageId,
+          chatId,
+          userId,
+          attachment.filename,
+          attachment.mediaType,
+          attachment.kind,
+          attachment.sizeBytes,
+          attachment.storagePath,
+          createdAt
+        );
+      }
+    }
 
     if (
       message.role === "user" &&
@@ -300,12 +467,15 @@ export function appendMessage(
 
   insertMessage();
 
-  return {
-    id: messageId,
-    role: message.role,
-    content: message.content,
-    createdAt
-  };
+  const persisted = getChat(userId, chatId)?.messages.find(
+    (storedMessage) => storedMessage.id === messageId
+  );
+
+  if (!persisted) {
+    throw new ChatStoreError("Message could not be persisted.", 500);
+  }
+
+  return persisted;
 }
 
 export function getChatHermesSessionId(userId: string, chatId: string) {
@@ -375,9 +545,9 @@ export function listMessagesForHermes(
   const rows = db
     .prepare(
       `
-        select role, content
+        select role, coalesce(hermes_content, content) as content
         from (
-          select role, content, created_at, id
+          select role, content, hermes_content, created_at, id
           from messages
           where chat_id = ?
             ${excludeClause}

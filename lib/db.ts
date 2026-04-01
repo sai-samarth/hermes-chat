@@ -78,6 +78,20 @@ function initializeDatabase(db: DatabaseInstance) {
       chat_id text not null references chats(id) on delete cascade,
       role text not null check (role in ('system', 'user', 'assistant')),
       content text not null,
+      hermes_content text,
+      created_at text not null
+    );
+
+    create table if not exists message_attachments (
+      id text primary key,
+      message_id text not null references messages(id) on delete cascade,
+      chat_id text not null references chats(id) on delete cascade,
+      owner_user_id text not null references users(id) on delete cascade,
+      filename text not null,
+      media_type text not null,
+      kind text not null check (kind in ('image', 'document')),
+      size_bytes integer not null,
+      storage_path text not null,
       created_at text not null
     );
   `);
@@ -103,6 +117,13 @@ function initializeDatabase(db: DatabaseInstance) {
     `);
   }
 
+  if (!columnExists(db, "messages", "hermes_content")) {
+    db.exec(`
+      alter table messages
+      add column hermes_content text
+    `);
+  }
+
   db.exec(`
     create index if not exists idx_sessions_user_expires_at
       on sessions (user_id, expires_at);
@@ -112,6 +133,12 @@ function initializeDatabase(db: DatabaseInstance) {
 
     create index if not exists idx_messages_chat_created_at
       on messages (chat_id, created_at, id);
+
+    create index if not exists idx_message_attachments_message
+      on message_attachments (message_id, created_at, id);
+
+    create index if not exists idx_message_attachments_owner
+      on message_attachments (owner_user_id, chat_id, created_at, id);
   `);
 }
 

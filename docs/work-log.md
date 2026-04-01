@@ -146,3 +146,23 @@ Larger UI refresh planned from the Claude brief:
 - Consolidated the signed-out screen into a single split-card auth layout.
 - Added dark scrollbars, stronger focus states, and broader hover polish.
 - Re-ran `npm run lint` and `npm run build` after the larger UI refresh.
+
+Phase 1 attachments slice:
+
+- Saved the attachment implementation plan to
+  `docs/plans/2026-04-01-attachments-phase1.md`.
+- Added shared attachment type definitions plus a server-side ingestion pipeline
+  in `lib/attachments.ts`.
+- Added local attachment storage, additive SQLite schema changes for
+  `messages.hermes_content` and `message_attachments`, plus authenticated
+  download support in `app/api/attachments/[attachmentId]/route.ts`.
+- Updated `app/api/chat/route.ts` so multipart sends can persist attachments,
+  build a Hermes-only attachment context string, and keep attachment context in
+  bootstrap history replay.
+- Updated `app/page.tsx` and `app/globals.css` with a clean composer attachment
+  button, pending-file pills, and attachment chips in the transcript.
+- Added extraction support for `.pdf`, `.docx`, `.xlsx`, `.pptx`, and common
+  text files while keeping image attachments path-based.
+- Verified the slice with `npm run lint`, `npm run build`, and real authenticated
+  end-to-end uploads for txt/pdf/docx/pptx/xlsx/image plus unsupported-file
+  rejection.

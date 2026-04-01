@@ -39,6 +39,14 @@ adapter.
 - Streaming now flows browser → Next.js API route → localhost bridge →
   profile-scoped Hermes worker, then persists the final assistant message on
   stream completion
-- No OAuth, password reset, email verification, or attachments have been added
+- Phase 1 attachments now support authenticated uploads plus persisted message
+  attachments for images, PDF, DOCX, XLSX, PPTX, and a narrow set of text-like
+  files
+- User-facing message text stays clean while a separate `messages.hermes_content`
+  field stores the attachment-aware Hermes input used for live sends and
+  bootstrap history replay
+- Stored attachments are served back through an authenticated download route at
+  `app/api/attachments/[attachmentId]/route.ts`
+- Audio, video, archives, and legacy binary Office formats remain out of scope
 - Postgres and the final gateway-native Hermes web/session model are still
   deferred
