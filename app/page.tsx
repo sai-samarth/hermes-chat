@@ -1104,7 +1104,7 @@ export default function Home() {
                         target={att.url ? '_blank' : undefined}
                         rel={att.url ? 'noreferrer' : undefined}
                       >
-                        {att.kind === 'image' ? '📷' : '📄'} {att.filename}
+                        {att.kind === 'image' ? 'IMG' : 'FILE'} {att.filename}
                       </a>
                     ))}
                   </div>
@@ -1124,7 +1124,7 @@ export default function Home() {
                   <div className="attachment-list">
                     {pendingAttachments.map((att) => (
                       <div key={att.id} className="attachment-chip">
-                        {att.kind === 'image' ? '📷' : '📄'} {att.file.name}
+                        {att.kind === 'image' ? 'IMG' : 'FILE'} {att.file.name}
                         <button
                           type="button"
                           className="attachment-remove"
@@ -1158,7 +1158,9 @@ export default function Home() {
                       disabled={composerBusy}
                       title="Attach file"
                     >
-                      📎
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.59a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+                      </svg>
                     </button>
                     <input
                       ref={composerFileInputRef}
