@@ -25,29 +25,7 @@ const DEFAULT_CHAT_TITLE = "New chat";
 const MAX_CHAT_TITLE_LENGTH = 80;
 const MAX_PREVIEW_LENGTH = 120;
 const DAY_MS = 24 * 60 * 60 * 1000;
-
-const suggestionPrompts = [
-  "Explain a concept clearly with examples.",
-  "Help me write something sharper.",
-  "Brainstorm ideas from a rough starting point.",
-  "Turn a messy thought into a plan."
-] as const;
-
-const timeFormatter = new Intl.DateTimeFormat(undefined, {
-  hour: "2-digit",
-  minute: "2-digit"
-});
-
-const monthDayFormatter = new Intl.DateTimeFormat(undefined, {
-  month: "short",
-  day: "numeric"
-});
-
-const fullDateFormatter = new Intl.DateTimeFormat(undefined, {
-  month: "short",
-  day: "numeric",
-  year: "numeric"
-});
+const MOBILE_SIDEBAR_BREAKPOINT_PX = 960;
 
 const monthYearFormatter = new Intl.DateTimeFormat(undefined, {
   month: "long",
@@ -115,28 +93,12 @@ function inferAttachmentKind(file: File): ChatAttachment["kind"] {
   return file.type.startsWith("image/") ? "image" : "document";
 }
 
-function formatAttachmentCount(count: number) {
-  return `${count} ${count === 1 ? "file" : "files"}`;
-}
-
 function buildAttachmentOnlyLabel(attachments: Array<{ filename: string }>) {
   if (attachments.length === 1) {
     return `Attached: ${attachments[0]?.filename ?? "file"}`;
   }
 
   return `Attached ${attachments.length} files`;
-}
-
-function formatFileSize(sizeBytes: number) {
-  if (sizeBytes < 1024) {
-    return `${sizeBytes} B`;
-  }
-
-  if (sizeBytes < 1024 * 1024) {
-    return `${(sizeBytes / 1024).toFixed(1)} KB`;
-  }
-
-  return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 async function readJson<T>(response: Response): Promise<T | null> {
@@ -216,36 +178,6 @@ function removeMessage(messages: PersistedChatMessage[], messageId: string) {
   return messages.filter((message) => message.id !== messageId);
 }
 
-function formatMessageTime(value: string) {
-  return timeFormatter.format(new Date(value));
-}
-
-function formatChatUpdatedAt(value: string) {
-  const updatedAt = new Date(value);
-  const elapsed = Date.now() - updatedAt.getTime();
-
-  if (elapsed < 60 * 60 * 1000) {
-    const minutes = Math.max(1, Math.floor(elapsed / (60 * 1000)));
-    return `${minutes}m ago`;
-  }
-
-  const now = new Date();
-  const isSameDay =
-    now.getFullYear() === updatedAt.getFullYear() &&
-    now.getMonth() === updatedAt.getMonth() &&
-    now.getDate() === updatedAt.getDate();
-
-  if (isSameDay) {
-    return timeFormatter.format(updatedAt);
-  }
-
-  if (now.getFullYear() === updatedAt.getFullYear()) {
-    return monthDayFormatter.format(updatedAt);
-  }
-
-  return fullDateFormatter.format(updatedAt);
-}
-
 function startOfDay(value: Date) {
   return new Date(value.getFullYear(), value.getMonth(), value.getDate());
 }
@@ -297,22 +229,6 @@ function groupChats(chats: ChatSummary[]): ChatGroup[] {
   return groups;
 }
 
-function getChatBlurb(chat: ChatSummary) {
-  return chat.lastMessagePreview ?? "Start the conversation with Hermes.";
-}
-
-function getChatMeta(chat: ChatSummary) {
-  if (chat.messageCount === 0) {
-    return "Empty chat";
-  }
-
-  return `${chat.messageCount} ${chat.messageCount === 1 ? "message" : "messages"}`;
-}
-
-function getMessageAuthor(role: PersistedChatMessage["role"]) {
-  return role === "assistant" ? "Hermes" : "You";
-}
-
 export default function Home() {
   const [sessionState, setSessionState] = useState<
     "loading" | "anonymous" | "authenticated"
@@ -336,6 +252,8 @@ export default function Home() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [composerError, setComposerError] = useState<string | null>(null);
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+  const [isCompactViewport, setIsCompactViewport] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
   const transcriptRef = useRef<HTMLDivElement>(null);
   const composerFormRef = useRef<HTMLFormElement>(null);
@@ -356,16 +274,6 @@ export default function Home() {
   const composerBusy = sidebarBusy || !selectedChatId;
   const authBusy = authPending || isLoggingOut || sessionState === "loading";
   const groupedChats = useMemo(() => groupChats(chats), [chats]);
-
-  const composerStatus = composerError
-    ? composerError
-    : isSending
-      ? "Hermes is responding"
-      : isLoadingChat
-        ? "Loading chat"
-        : !selectedChatId
-          ? "Start a chat"
-          : "Ready";
 
   const resetWorkspaceState = useCallback(() => {
     setChats([]);
@@ -401,6 +309,29 @@ export default function Home() {
       behavior: "smooth"
     });
   }, [isAuthenticated, isLoadingChat, isSending, messages]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const mediaQuery = window.matchMedia(
+      `(max-width: ${MOBILE_SIDEBAR_BREAKPOINT_PX}px)`
+    );
+
+    const syncViewport = () => {
+      const compact = mediaQuery.matches;
+      setIsCompactViewport(compact);
+      setIsSidebarOpen(!compact);
+    };
+
+    syncViewport();
+    mediaQuery.addEventListener("change", syncViewport);
+
+    return () => {
+      mediaQuery.removeEventListener("change", syncViewport);
+    };
+  }, []);
 
   useEffect(() => {
     async function loadSession() {
@@ -926,502 +857,335 @@ export default function Home() {
     composerFormRef.current?.requestSubmit();
   }
 
-  async function handleSuggestionSelect(prompt: string) {
-    setComposerError(null);
-
-    if (!selectedChatId) {
-      await handleCreateChat(prompt);
-      return;
-    }
-
-    setDraft(prompt);
-    composerInputRef.current?.focus();
-  }
-
   if (!isAuthenticated || !sessionUser) {
     return (
-      <main className="preview-shell">
-        <section className="auth-shell">
-          <div className="auth-frame">
-            <div className="auth-hero">
-              <div className="sidebar-top auth-brand">
-                <div className="brand-mark">H</div>
+      <div className="auth-container">
+        <div className="auth-box">
+          <div className="auth-header">
+            <h1>Hermes Chat</h1>
+            <p>Private conversations, kept in place.</p>
+          </div>
 
-                <div>
-                  <p className="eyebrow">Hermes Chat</p>
-                  <p className="sidebar-title">Private by default</p>
-                </div>
-              </div>
+          <div className="auth-tabs">
+            <button
+              type="button"
+              className={`auth-tab${authMode === "login" ? ' auth-tab-active' : ''}`}
+              onClick={() => {
+                setAuthMode("login");
+                setAuthError(null);
+              }}
+              disabled={authBusy}
+            >
+              Log in
+            </button>
+            <button
+              type="button"
+              className={`auth-tab${authMode === "register" ? ' auth-tab-active' : ''}`}
+              onClick={() => {
+                setAuthMode("register");
+                setAuthError(null);
+              }}
+              disabled={authBusy}
+            >
+              Register
+            </button>
+          </div>
 
-              <div className="auth-copy-stack">
-                <h1 className="auth-title">A quieter place to think with Hermes.</h1>
-                <p className="auth-copy">
-                  Your chats stay personal, persistent, and easy to return to.
-                  Sign in to continue your workspace.
-                </p>
-              </div>
-
-              <div className="auth-points" aria-label="Product benefits">
-                <p>Private conversations on this machine</p>
-                <p>One chat thread that stays in context</p>
-                <p>Fast, focused workspace without extra noise</p>
-              </div>
+          <form className="auth-form" onSubmit={handleAuthSubmit}>
+            <div className="form-group">
+              <label className="form-label">Email</label>
+              <input
+                className="form-input"
+                type="email"
+                name="email"
+                autoComplete="email"
+                value={authEmail}
+                onChange={(e) => setAuthEmail(e.target.value)}
+                placeholder="name@company.com"
+                disabled={authBusy}
+              />
             </div>
 
-            <section className="auth-panel" aria-label="Authentication">
-              <div className="auth-toggle" role="tablist" aria-label="Auth mode">
-                <button
-                  type="button"
-                  className={`auth-toggle-button${authMode === "login" ? " auth-toggle-button-active" : ""}`}
-                  onClick={() => {
-                    setAuthMode("login");
-                    setAuthError(null);
-                  }}
-                  disabled={authBusy}
-                >
-                  Log in
-                </button>
-                <button
-                  type="button"
-                  className={`auth-toggle-button${authMode === "register" ? " auth-toggle-button-active" : ""}`}
-                  onClick={() => {
-                    setAuthMode("register");
-                    setAuthError(null);
-                  }}
-                  disabled={authBusy}
-                >
-                  Register
-                </button>
-              </div>
+            <div className="form-group">
+              <label className="form-label">Password</label>
+              <input
+                className="form-input"
+                type="password"
+                name="password"
+                autoComplete={authMode === "login" ? "current-password" : "new-password"}
+                value={authPassword}
+                onChange={(e) => setAuthPassword(e.target.value)}
+                placeholder={authMode === "login" ? "Password" : "At least 8 characters"}
+                disabled={authBusy}
+              />
+            </div>
 
-              <div className="auth-panel-copy">
-                <p className="eyebrow">Access</p>
-                <h2>
-                  {authMode === "login"
-                    ? "Return to your workspace"
-                    : "Create your workspace"}
-                </h2>
-                <p>
-                  {authMode === "login"
-                    ? "Pick up where you left off."
-                    : "Set up a personal space for ongoing conversations with Hermes."}
-                </p>
-              </div>
+            {authError && (
+              <div className="auth-error">{authError}</div>
+            )}
 
-              <form className="auth-form" onSubmit={handleAuthSubmit}>
-                <label className="auth-field">
-                  <span className="composer-label">Email</span>
-                  <input
-                    className="auth-input"
-                    type="email"
-                    name="email"
-                    autoComplete="email"
-                    value={authEmail}
-                    onChange={(event) => setAuthEmail(event.target.value)}
-                    placeholder="name@company.com"
-                    disabled={authBusy}
-                  />
-                </label>
-
-                <label className="auth-field">
-                  <span className="composer-label">Password</span>
-                  <input
-                    className="auth-input"
-                    type="password"
-                    name="password"
-                    autoComplete={
-                      authMode === "login" ? "current-password" : "new-password"
-                    }
-                    value={authPassword}
-                    onChange={(event) => setAuthPassword(event.target.value)}
-                    placeholder="At least 8 characters"
-                    disabled={authBusy}
-                  />
-                </label>
-
-                {authError ? (
-                  <p className="auth-status auth-status-error" role="alert">
-                    {authError}
-                  </p>
-                ) : (
-                  <p className="auth-status" aria-live="polite">
-                    {sessionState === "loading"
-                      ? "Getting things ready..."
-                      : authMode === "login"
-                        ? "Use the email and password for this workspace."
-                        : "Use at least 8 characters for your password."}
-                  </p>
-                )}
-
-                <button className="auth-submit" type="submit" disabled={authBusy}>
-                  {authPending
-                    ? authMode === "login"
-                      ? "Signing in..."
-                      : "Creating..."
-                    : authMode === "login"
-                      ? "Log in"
-                      : "Create account"}
-                </button>
-              </form>
-            </section>
-          </div>
-        </section>
-      </main>
+            <button className="auth-submit" type="submit" disabled={authBusy}>
+              {authPending
+                ? authMode === "login" ? "Signing in..." : "Creating..."
+                : authMode === "login" ? "Log in" : "Create account"}
+            </button>
+          </form>
+        </div>
+      </div>
     );
   }
 
   return (
-    <main className="preview-shell">
-      <div className="workspace-shell">
-        <aside className="sidebar" aria-label="Workspace navigation">
-          <div className="sidebar-top sidebar-brand-block">
-            <div className="brand-mark">H</div>
+    <div className="workspace-shell">
+      {/* Mobile sidebar scrim */}
+      {isCompactViewport && isSidebarOpen && (
+        <button
+          type="button"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.5)',
+            zIndex: 99,
+            border: 'none',
+            cursor: 'pointer'
+          }}
+          aria-label="Close sidebar"
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
 
-            <div>
-              <p className="eyebrow">Hermes Chat</p>
-              <p className="sidebar-title">Workspace</p>
-              <p className="sidebar-intro">
-                Focused conversations, kept in place.
-              </p>
-            </div>
-          </div>
-
-          <section aria-labelledby="threads-heading" className="sidebar-section">
-            <div className="section-head">
-              <div>
-                <p id="threads-heading" className="section-label">
-                  Chats
-                </p>
-                <p className="section-count">
-                  {chats.length} {chats.length === 1 ? "chat" : "chats"}
-                </p>
-              </div>
-
-              <button
-                type="button"
-                className="sidebar-action sidebar-action-primary"
-                onClick={() => void handleCreateChat()}
-                disabled={sidebarBusy}
-              >
-                {isCreatingChat ? "Creating..." : "+ New chat"}
-              </button>
-            </div>
-
-            <div className="thread-list" role="list">
-              {groupedChats.map((group) => (
-                <section key={group.key} className="thread-group" aria-label={group.label}>
-                  <p className="thread-group-label">{group.label}</p>
-                  <ul className="thread-group-list">
-                    {group.chats.map((chat) => (
-                      <li key={chat.id}>
-                        <button
-                          type="button"
-                          className={`thread-item${chat.id === selectedChatId ? " thread-item-active" : ""}`}
-                          onClick={() => void loadChat(chat.id)}
-                          disabled={sidebarBusy || chat.id === selectedChatId}
-                          aria-current={chat.id === selectedChatId ? "page" : undefined}
-                        >
-                          <div className="thread-row">
-                            <p className="thread-title">{chat.title}</p>
-                            <p className="thread-updated">
-                              {formatChatUpdatedAt(chat.updatedAt)}
-                            </p>
-                          </div>
-
-                          <p className="thread-blurb">{getChatBlurb(chat)}</p>
-                          <p className="thread-meta">{getChatMeta(chat)}</p>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              ))}
-            </div>
-          </section>
-
-          <div className="sidebar-foot">
-            <div className="sidebar-account-shell">
-              <div className="sidebar-account-avatar" aria-hidden="true">
-                {sessionUser.email.charAt(0).toUpperCase()}
-              </div>
-              <div className="sidebar-account">
-                <p className="sidebar-note-title">Account</p>
-                <p className="sidebar-account-email">{sessionUser.email}</p>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              className="sidebar-secondary-action"
-              onClick={() => void handleLogout()}
-              disabled={isLoggingOut}
-            >
-              {isLoggingOut ? "Signing out..." : "Log out"}
-            </button>
-          </div>
-        </aside>
-
-        <section className="chat-panel" aria-label="Chat workspace">
-          <header className="chat-topbar">
-            <div className="chat-column chat-topbar-inner">
-              <div className="chat-title-block">
-                <p className="eyebrow">Conversation</p>
-
-                <div className="chat-heading-row">
-                  <h1>
-                    {currentChat?.title ??
-                      (isBootstrapping
-                        ? "Loading chats"
-                        : chats.length === 0
-                          ? "Start a new chat"
-                          : "Choose a chat")}
-                  </h1>
-                </div>
-
-                <p className="chat-summary">
-                  {currentChat
-                    ? "A persistent thread with Hermes."
-                    : chats.length === 0
-                      ? "Create a chat to begin, or use a starter below."
-                      : "Pick a conversation from the sidebar, or start a fresh one."}
-                </p>
-              </div>
-            </div>
-          </header>
-
-          <div
-            ref={transcriptRef}
-            className="message-list"
-            aria-label="Conversation transcript"
+      {/* Sidebar */}
+      <aside
+        className={`sidebar${isSidebarOpen ? '' : ' sidebar-collapsed'}${isCompactViewport && isSidebarOpen ? ' sidebar-open' : ''}`}
+        aria-label="Workspace navigation"
+      >
+        <div className={`sidebar-header${isSidebarOpen ? '' : ' sidebar-header-collapsed'}`}>
+          {isSidebarOpen && <span className="brand-text">Hermes</span>}
+          <button
+            type="button"
+            className={`sidebar-toggle${isSidebarOpen ? '' : ' sidebar-toggle-collapsed'}`}
+            onClick={() => setIsSidebarOpen(v => !v)}
+            aria-label={isSidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
           >
-            <div className="chat-column transcript-column">
-              <p className="timeline-mark">
-                {isBootstrapping
-                  ? "Loading"
-                  : isLoadingChat
-                    ? "Opening chat"
-                    : currentChat
-                      ? "Live transcript"
-                      : "Conversation"}
-              </p>
+            {isSidebarOpen ? '‹' : '›'}
+          </button>
+        </div>
 
-              {loadError ? (
-                <p className="timeline-status timeline-status-error" role="alert">
-                  {loadError}
-                </p>
-              ) : null}
+        <button
+          type="button"
+          className={`new-chat-btn${isSidebarOpen ? '' : ' new-chat-btn-collapsed'}`}
+          onClick={() => {
+            if (isCompactViewport) setIsSidebarOpen(false);
+            void handleCreateChat();
+          }}
+          disabled={sidebarBusy}
+        >
+          <span>+</span>
+          {isSidebarOpen && (isCreatingChat ? 'Creating...' : 'New chat')}
+        </button>
 
-              {!loadError &&
-              !isBootstrapping &&
-              !isLoadingChat &&
-              messages.length === 0 ? (
-                <section className="empty-state" aria-label="Chat empty state">
-                  <div className="empty-state-mark">H</div>
-                  <h2>
-                    {selectedChatId
-                      ? "This thread is ready for a first message"
-                      : "A quieter place to think with Hermes"}
-                  </h2>
-                  <p>
-                    {selectedChatId
-                      ? "Send a question, paste a prompt, or pick a starter to get the conversation moving."
-                      : "Start a new thread, then use a starter below to drop a thought into the composer."}
-                  </p>
-
-                  <div className="suggestion-grid" role="list">
-                    {suggestionPrompts.map((prompt) => (
-                      <button
-                        key={prompt}
-                        type="button"
-                        className="suggestion-pill"
-                        onClick={() => void handleSuggestionSelect(prompt)}
-                        disabled={sidebarBusy}
-                      >
-                        {prompt}
-                      </button>
-                    ))}
-                  </div>
-
-                  {!selectedChatId ? (
+        <div className="thread-list">
+          {groupedChats.map((group) => (
+            <div key={group.key} className="thread-group">
+              {isSidebarOpen && <div className="thread-group-label">{group.label}</div>}
+              <ul className="thread-group-list">
+                {group.chats.map((chat) => (
+                  <li key={chat.id}>
                     <button
                       type="button"
-                      className="empty-state-action"
-                      onClick={() => void handleCreateChat()}
-                      disabled={sidebarBusy}
+                      className={`thread-item${chat.id === selectedChatId ? ' thread-item-active' : ''}${isSidebarOpen ? '' : ' thread-item-collapsed'}`}
+                      onClick={() => {
+                        if (isCompactViewport) setIsSidebarOpen(false);
+                        void loadChat(chat.id);
+                      }}
+                      disabled={sidebarBusy || chat.id === selectedChatId}
+                      title={chat.title}
                     >
-                      {isCreatingChat ? "Creating..." : "Start a new chat"}
-                    </button>
-                  ) : null}
-                </section>
-              ) : null}
-
-              {messages.map((message) => (
-                <article
-                  key={message.id}
-                  className={`message message-${message.role}`}
-                >
-                  <div className="message-meta">
-                    <div className="message-identity">
-                      {message.role === "assistant" ? (
-                        <span className="message-avatar" aria-hidden="true">
-                          H
-                        </span>
+                      {isSidebarOpen ? (
+                        <>{chat.title}</>
                       ) : (
-                        <span className="message-avatar message-avatar-user" aria-hidden="true">
-                          Y
-                        </span>
+                        <span style={{fontSize: '11px'}}>{chat.title.slice(0, 2)}</span>
                       )}
-                      <span>{getMessageAuthor(message.role)}</span>
-                    </div>
-                    <span>{formatMessageTime(message.createdAt)}</span>
-                  </div>
-
-                  <div className="message-copy">
-                    {renderChatMarkdown(
-                      message.content ||
-                        (message.role === "assistant" && isSending
-                          ? "Thinking…"
-                          : "")
-                    )}
-                  </div>
-
-                  {message.attachments.length > 0 ? (
-                    <div className="message-attachments" aria-label="Message attachments">
-                      {message.attachments.map((attachment) => (
-                        <a
-                          key={attachment.id}
-                          className="message-attachment-chip"
-                          href={attachment.url || undefined}
-                          target={attachment.url ? "_blank" : undefined}
-                          rel={attachment.url ? "noreferrer" : undefined}
-                        >
-                          <span className="message-attachment-kind">
-                            {attachment.kind === "image" ? "Image" : "File"}
-                          </span>
-                          <span className="message-attachment-name">{attachment.filename}</span>
-                          <span className="message-attachment-size">
-                            {formatFileSize(attachment.sizeBytes)}
-                          </span>
-                        </a>
-                      ))}
-                    </div>
-                  ) : null}
-                </article>
-              ))}
+                    </button>
+                  </li>
+                ))}
+              </ul>
             </div>
-          </div>
+          ))}
+        </div>
 
-          <footer className="composer-shell" aria-label="Chat composer">
-            <div className="chat-column composer-column">
-              <form
-                ref={composerFormRef}
-                className="composer-form"
-                onSubmit={handleSubmit}
-              >
-                <div className="composer-card">
-                  <div className="composer-heading-row">
-                    <label className="composer-label" htmlFor="chat-draft">
-                      Message Hermes
-                    </label>
+        <div className="sidebar-footer">
+          <button
+            type="button"
+            className="user-btn"
+            onClick={() => void handleLogout()}
+            disabled={isLoggingOut}
+          >
+            <div className="user-avatar">{sessionUser.email.charAt(0).toUpperCase()}</div>
+            {isSidebarOpen && <span className="user-email">{sessionUser.email}</span>}
+          </button>
+        </div>
+      </aside>
+
+      {/* Main chat area */}
+      <section className="chat-panel" aria-label="Chat workspace">
+        <header className="chat-topbar">
+          <div className="chat-topbar-left">
+            <button
+              type="button"
+              className="menu-btn"
+              onClick={() => setIsSidebarOpen(v => !v)}
+              aria-label="Toggle sidebar"
+            >
+              ☰
+            </button>
+            <h1 className="chat-title">
+              {currentChat?.title || (chats.length === 0 ? 'New chat' : 'Select a chat')}
+            </h1>
+          </div>
+          <div className="chat-actions">
+            <button
+              type="button"
+              className="icon-btn"
+              onClick={() => void handleCreateChat()}
+              disabled={sidebarBusy}
+              title="New chat"
+            >
+              +
+            </button>
+          </div>
+        </header>
+
+        <div ref={transcriptRef} className="message-list">
+          <div className="chat-container">
+            {/* Status */}
+            {(isBootstrapping || isLoadingChat) && (
+              <div className="status-indicator">
+                {isBootstrapping ? 'Loading...' : 'Opening chat...'}
+              </div>
+            )}
+
+            {loadError && (
+              <div className="status-indicator" style={{color: 'var(--danger)'}}>
+                {loadError}
+              </div>
+            )}
+
+            {/* Empty state - minimal */}
+            {!isBootstrapping && !isLoadingChat && messages.length === 0 && (
+              <div className="empty-state">
+                <h1 className="empty-state-title">What can I help you with?</h1>
+              </div>
+            )}
+
+            {/* Messages */}
+            {messages.map((message) => (
+              <article key={message.id} className={`message message-${message.role}`}>
+                <div className="message-header">
+                  <div className={`message-avatar message-avatar-${message.role}`}>
+                    {message.role === 'assistant' ? 'H' : 'Y'}
+                  </div>
+                  <span className="message-role">
+                    {message.role === 'assistant' ? 'Hermes' : 'You'}
+                  </span>
+                </div>
+                <div className="message-content">
+                  {renderChatMarkdown(
+                    message.content || (message.role === 'assistant' && isSending ? 'Thinking...' : '')
+                  )}
+                </div>
+                {message.attachments.length > 0 && (
+                  <div className="attachment-list">
+                    {message.attachments.map((att) => (
+                      <a
+                        key={att.id}
+                        className="attachment-chip"
+                        href={att.url || undefined}
+                        target={att.url ? '_blank' : undefined}
+                        rel={att.url ? 'noreferrer' : undefined}
+                      >
+                        {att.kind === 'image' ? '📷' : '📄'} {att.filename}
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </article>
+            ))}
+          </div>
+        </div>
+
+        {/* Composer */}
+        <footer className="composer">
+          <div className="composer-container">
+            <form onSubmit={handleSubmit}>
+              <div className="composer-box">
+                {/* Attachments */}
+                {pendingAttachments.length > 0 && (
+                  <div className="attachment-list">
+                    {pendingAttachments.map((att) => (
+                      <div key={att.id} className="attachment-chip">
+                        {att.kind === 'image' ? '📷' : '📄'} {att.file.name}
+                        <button
+                          type="button"
+                          className="attachment-remove"
+                          onClick={() => handleRemovePendingAttachment(att.id)}
+                          disabled={composerBusy}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <textarea
+                  ref={composerInputRef}
+                  className="composer-input"
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={handleComposerKeyDown}
+                  placeholder="Message Hermes..."
+                  disabled={composerBusy}
+                  rows={1}
+                />
+
+                <div className="composer-toolbar">
+                  <div className="composer-actions">
+                    <button
+                      type="button"
+                      className="composer-action-btn"
+                      onClick={() => composerFileInputRef.current?.click()}
+                      disabled={composerBusy}
+                      title="Attach file"
+                    >
+                      📎
+                    </button>
                     <input
                       ref={composerFileInputRef}
-                      className="composer-file-input"
                       type="file"
-                      name="attachments"
                       multiple
                       accept={composerFileAccept}
                       onChange={handleAttachmentInputChange}
                       disabled={composerBusy}
+                      style={{display: 'none'}}
                     />
-                    <button
-                      type="button"
-                      className="composer-attachment-button"
-                      onClick={() => composerFileInputRef.current?.click()}
-                      disabled={composerBusy}
-                    >
-                      Attach files
-                    </button>
                   </div>
-
-                  {pendingAttachments.length > 0 ? (
-                    <div className="composer-attachments" aria-label="Pending attachments">
-                      {pendingAttachments.map((attachment) => (
-                        <div key={attachment.id} className="composer-attachment-pill">
-                          <div className="composer-attachment-copy">
-                            <span className="composer-attachment-kind">
-                              {attachment.kind === "image" ? "Image" : "File"}
-                            </span>
-                            <span className="composer-attachment-name">
-                              {attachment.file.name}
-                            </span>
-                            <span className="composer-attachment-size">
-                              {formatFileSize(attachment.sizeBytes)}
-                            </span>
-                          </div>
-                          <button
-                            type="button"
-                            className="composer-attachment-remove"
-                            onClick={() => handleRemovePendingAttachment(attachment.id)}
-                            disabled={composerBusy}
-                            aria-label={`Remove ${attachment.file.name}`}
-                          >
-                            ×
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
-
-                  <textarea
-                    ref={composerInputRef}
-                    id="chat-draft"
-                    className="composer-input"
-                    name="chat-draft"
-                    value={draft}
-                    onChange={(event) => setDraft(event.target.value)}
-                    onKeyDown={handleComposerKeyDown}
-                    placeholder="Message Hermes"
-                    rows={4}
-                    disabled={composerBusy}
-                  />
-
-                  <div className="composer-footer-row">
-                    <div className="composer-footnotes">
-                      <p className="composer-copy">
-                        Attach images, PDFs, DOCX, XLSX, PPTX, and common text files.
-                      </p>
-                      <p className="composer-shortcut">
-                        Enter to send, Shift+Enter for newline
-                      </p>
-                    </div>
-
-                    <div className="composer-controls">
-                      <span
-                        className={`composer-badge${composerError ? " composer-badge-error" : ""}`}
-                        aria-live="polite"
-                        role={composerError ? "alert" : undefined}
-                      >
-                        {pendingAttachments.length > 0
-                          ? `${composerStatus} · ${formatAttachmentCount(pendingAttachments.length)}`
-                          : composerStatus}
-                      </span>
-
-                      <button
-                        className="composer-button"
-                        type="submit"
-                        disabled={composerBusy || (draft.trim().length === 0 && pendingAttachments.length === 0)}
-                        aria-label={isSending ? "Sending" : "Send message"}
-                      >
-                        <span aria-hidden="true">↑</span>
-                      </button>
-                    </div>
-                  </div>
+                  <span className="composer-status">
+                    {composerError || (isSending ? 'Sending...' : '')}
+                  </span>
+                  <button
+                    type="submit"
+                    className="composer-send"
+                    disabled={composerBusy || (!draft.trim() && pendingAttachments.length === 0)}
+                  >
+                    ↑
+                  </button>
                 </div>
-              </form>
-            </div>
-          </footer>
-        </section>
-      </div>
-    </main>
+              </div>
+            </form>
+          </div>
+        </footer>
+      </section>
+    </div>
   );
 }
