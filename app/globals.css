@@ -303,9 +303,8 @@ textarea {
   text-align: center;
 }
 
-/* Thread item with menu */
+/* Thread item with inline actions */
 .thread-item-wrapper {
-  position: relative;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -322,7 +321,19 @@ textarea {
   white-space: nowrap;
 }
 
-.thread-item-menu-btn {
+.thread-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.thread-item-wrapper:hover .thread-item-actions {
+  opacity: 1;
+}
+
+.thread-item-action-btn {
   width: 24px;
   height: 24px;
   display: grid;
@@ -332,57 +343,18 @@ textarea {
   background: transparent;
   color: var(--text-tertiary);
   cursor: pointer;
-  opacity: 0;
   transition: all 0.15s ease;
   flex-shrink: 0;
 }
 
-.thread-item-wrapper:hover .thread-item-menu-btn {
-  opacity: 1;
-}
-
-.thread-item-menu-btn:hover {
+.thread-item-action-btn:hover {
   background: var(--surface-hover);
   color: var(--text);
 }
 
-.thread-item-menu {
-  position: absolute;
-  right: 0;
-  top: 100%;
-  margin-top: 4px;
-  min-width: 120px;
-  padding: 4px;
-  background: var(--canvas);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg);
-  z-index: 50;
-}
-
-.thread-item-menu-item {
-  width: 100%;
-  padding: 8px 12px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text);
-  font-size: 13px;
-  text-align: left;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.thread-item-menu-item:hover {
-  background: var(--surface-hover);
-}
-
-.thread-item-menu-item-danger {
-  color: var(--danger);
-}
-
-.thread-item-menu-item-danger:hover {
+.thread-item-action-btn-danger:hover {
   background: rgba(239, 68, 68, 0.1);
+  color: var(--danger);
 }
 
 .sidebar-footer {
