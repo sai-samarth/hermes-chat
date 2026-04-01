@@ -126,11 +126,179 @@ async function readJson<T>(response: Response): Promise<T | null> {
   return (await response.json().catch(() => null)) as T | null;
 }
 
+// Get human-readable tool description
+function getToolDescription(name: string, args: Record<string, unknown>): string {
+  // Core tool handlers with context-aware descriptions
+  
+  if (name === 'web_search' || name === 'search' || name === 'duckduckgo_search') {
+    const query = args?.query || args?.q || args?.search;
+    if (typeof query === 'string' && query) {
+      return `Searching for "${query.slice(0, 50)}${query.length > 50 ? '...' : ''}"`;
+    }
+    return 'Searching the web';
+  }
+  
+  if (name === 'terminal') {
+    const cmd = args?.command || args?.cmd;
+    if (typeof cmd === 'string') {
+      const mainCmd = cmd.trim().split(/\s+/)[0];
+      const knownCommands: Record<string, string> = {
+        ls: 'Listing files',
+        cd: 'Changing directory',
+        pwd: 'Showing current directory',
+        cat: 'Reading file',
+        grep: 'Searching in files',
+        find: 'Finding files',
+        mkdir: 'Creating directory',
+        rm: 'Removing file',
+        cp: 'Copying file',
+        mv: 'Moving file',
+        git: 'Running git',
+        npm: 'Running npm',
+        yarn: 'Running yarn',
+        pip: 'Running pip',
+        python: 'Running Python',
+        python3: 'Running Python',
+        node: 'Running Node.js',
+        docker: 'Running Docker',
+        kubectl: 'Running kubectl',
+        helm: 'Running Helm',
+        terraform: 'Running Terraform',
+        ssh: 'Connecting via SSH',
+        curl: 'Fetching URL',
+        wget: 'Downloading file',
+        echo: 'Printing message',
+        head: 'Viewing file start',
+        tail: 'Viewing file end',
+        sort: 'Sorting data',
+        uniq: 'Finding unique lines',
+        wc: 'Counting lines',
+        diff: 'Comparing files',
+        tar: 'Archiving files',
+        zip: 'Compressing files',
+        unzip: 'Extracting files',
+        chmod: 'Changing permissions',
+        ps: 'Listing processes',
+        top: 'Viewing processes',
+        df: 'Checking disk space',
+        du: 'Checking directory size'
+      };
+      return knownCommands[mainCmd] || `Running ${mainCmd}`;
+    }
+    return 'Running command';
+  }
+  
+  if (name === 'read_file') {
+    const path = args?.path || args?.file;
+    if (typeof path === 'string') {
+      const filename = path.split('/').pop() || path;
+      return `Reading ${filename}`;
+    }
+    return 'Reading file';
+  }
+  
+  if (name === 'write_file' || name === 'patch') {
+    const path = args?.path || args?.file;
+    if (typeof path === 'string') {
+      const filename = path.split('/').pop() || path;
+      return name === 'write_file' ? `Writing ${filename}` : `Editing ${filename}`;
+    }
+    return name === 'write_file' ? 'Writing file' : 'Editing file';
+  }
+  
+  if (name === 'search_files') {
+    const pattern = args?.pattern || args?.query;
+    if (typeof pattern === 'string') {
+      return `Searching files for "${pattern.slice(0, 30)}${pattern.length > 30 ? '...' : ''}"`;
+    }
+    return 'Searching files';
+  }
+  
+  if (name === 'skill_view' || name === 'skill_manage' || name === 'skills_list') {
+    const skillName = args?.name || args?.skill;
+    if (typeof skillName === 'string') {
+      return name === 'skill_view' ? `Loading ${skillName} skill` : 
+             name === 'skill_manage' ? `Managing ${skillName} skill` : 'Listing skills';
+    }
+    return 'Working with skills';
+  }
+  
+  if (name === 'memory') {
+    const action = args?.action;
+    const target = args?.target || 'memory';
+    if (action === 'add') return `Saving to ${target}`;
+    if (action === 'replace') return `Updating ${target}`;
+    if (action === 'remove') return `Removing from ${target}`;
+    return `Checking ${target}`;
+  }
+  
+  if (name === 'todo') {
+    return 'Updating task list';
+  }
+  
+  if (name === 'session_search') {
+    const query = args?.query;
+    if (typeof query === 'string') {
+      return `Searching history for "${query.slice(0, 30)}${query.length > 30 ? '...' : ''}"`;
+    }
+    return 'Searching conversation history';
+  }
+  
+  if (name === 'execute_code') {
+    return 'Executing Python code';
+  }
+  
+  if (name === 'delegate_task') {
+    const goal = args?.goal;
+    if (typeof goal === 'string') {
+      return `Delegating: ${goal.slice(0, 40)}${goal.length > 40 ? '...' : ''}`;
+    }
+    return 'Delegating task';
+  }
+  
+  if (name === 'send_message') {
+    const platform = args?.platform || args?.to;
+    if (platform) {
+      return `Sending message via ${platform}`;
+    }
+    return 'Sending message';
+  }
+  
+  if (name === 'vision_analyze') {
+    return 'Analyzing image';
+  }
+  
+  if (name === 'github_repo_management' || name === 'github_pr_workflow' || name === 'github_issues') {
+    const action = args?.action;
+    if (typeof action === 'string' && action) {
+      return `${action.charAt(0).toUpperCase() + action.slice(1)}ing repository`;
+    }
+    return 'Working with GitHub';
+  }
+  
+  if (name === 'cronjob') {
+    const action = args?.action;
+    if (action === 'create') return 'Creating scheduled job';
+    if (action === 'list') return 'Listing scheduled jobs';
+    if (action === 'remove') return 'Removing scheduled job';
+    return 'Managing scheduled jobs';
+  }
+  
+  // Fallback: format the tool name nicely
+  return name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+}
+
 // Tool call UI components
 function ToolCallList({ toolCalls }: { toolCalls: ToolCall[] }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const pendingCount = toolCalls.filter(tc => tc.status === "pending").length;
   const hasAnyPending = pendingCount > 0;
+  
+  // Build natural language summary
+  const descriptions = toolCalls.map(tc => getToolDescription(tc.name, tc.arguments));
+  const uniqueDescriptions = [...new Set(descriptions)];
+  const summaryText = uniqueDescriptions.slice(0, 3).join(", ");
+  const hasMore = uniqueDescriptions.length > 3;
 
   return (
     <div className="tool-call-list">
@@ -150,9 +318,11 @@ function ToolCallList({ toolCalls }: { toolCalls: ToolCall[] }) {
           )}
         </span>
         <span className="tool-call-list-text">
-          {hasAnyPending
-            ? `Using ${toolCalls.length} tool${toolCalls.length > 1 ? 's' : ''}...`
-            : `Used ${toolCalls.length} tool${toolCalls.length > 1 ? 's' : ''}`}
+          {hasAnyPending ? (
+            <>{summaryText}{hasMore && ` and ${uniqueDescriptions.length - 3} more`}...</>
+          ) : (
+            <>Used {toolCalls.length} tool{toolCalls.length > 1 ? 's' : ''}</>
+          )}
         </span>
         <span className={`tool-call-list-chevron ${isExpanded ? 'expanded' : ''}`}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -172,13 +342,20 @@ function ToolCallList({ toolCalls }: { toolCalls: ToolCall[] }) {
 }
 
 function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
-  const [showArgs, setShowArgs] = useState(false);
-  const [showResult, setShowResult] = useState(false);
   const isPending = toolCall.status === "pending";
   const isError = toolCall.status === "error";
-  const duration = toolCall.completedAt && toolCall.startedAt
-    ? new Date(toolCall.completedAt).getTime() - new Date(toolCall.startedAt).getTime()
-    : null;
+  const description = getToolDescription(toolCall.name, toolCall.arguments);
+  
+  // Get duration in human readable format
+  let durationText = "";
+  if (toolCall.completedAt && toolCall.startedAt) {
+    const duration = new Date(toolCall.completedAt).getTime() - new Date(toolCall.startedAt).getTime();
+    if (duration < 1000) {
+      durationText = `${duration}ms`;
+    } else {
+      durationText = `${(duration / 1000).toFixed(1)}s`;
+    }
+  }
 
   return (
     <div className={`tool-call-card ${isPending ? 'pending' : ''} ${isError ? 'error' : ''}`}>
@@ -198,39 +375,9 @@ function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
             </svg>
           )}
         </span>
-        <span className="tool-call-card-name">{toolCall.name}</span>
-        {duration !== null && (
-          <span className="tool-call-card-duration">{duration}ms</span>
-        )}
-      </div>
-      <div className="tool-call-card-body">
-        <button
-          type="button"
-          className="tool-call-toggle"
-          onClick={() => setShowArgs(!showArgs)}
-        >
-          Arguments {showArgs ? '▾' : '▸'}
-        </button>
-        {showArgs && (
-          <pre className="tool-call-code">{JSON.stringify(toolCall.arguments, null, 2)}</pre>
-        )}
-        {!isPending && (
-          <>
-            <button
-              type="button"
-              className="tool-call-toggle"
-              onClick={() => setShowResult(!showResult)}
-            >
-              {isError ? 'Error' : 'Result'} {showResult ? '▾' : '▸'}
-            </button>
-            {showResult && (
-              <pre className="tool-call-code">
-                {isError
-                  ? toolCall.error
-                  : JSON.stringify(toolCall.result, null, 2)}
-              </pre>
-            )}
-          </>
+        <span className="tool-call-card-name">{description}</span>
+        {durationText && (
+          <span className="tool-call-card-duration">{durationText}</span>
         )}
       </div>
     </div>
