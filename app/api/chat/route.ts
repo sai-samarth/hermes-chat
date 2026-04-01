@@ -262,7 +262,8 @@ export async function POST(request: Request) {
     );
 
     if (!wantsStreaming) {
-      const hermesTurn = await createHermesChatTurn({
+      // Use streaming endpoint internally to collect tool events
+      const bridgeResponse = await createHermesChatTurnStream({
         appUserId: user.id,
         appUserEmail: user.email,
         chatId: parsedRequest.chatId,
@@ -271,12 +272,108 @@ export async function POST(request: Request) {
         history
       });
 
-      setUserHermesProfileName(user.id, hermesTurn.hermesProfileName);
-      setChatHermesSessionId(user.id, parsedRequest.chatId, hermesTurn.hermesSessionId);
+      const reader = bridgeResponse.body?.getReader();
+      if (!reader) {
+        throw new HermesClientError("Hermes bridge returned no response body.", 502);
+      }
 
-      const message = appendMessage(user.id, parsedRequest.chatId, hermesTurn.assistantMessage);
+      const parser = createSseParser();
+      let assistantText = "";
+      const toolCalls = new Map<string, {
+        id: string;
+        name: string;
+        arguments: Record<string, unknown>;
+        result?: unknown;
+        error?: string;
+        status: "pending" | "complete" | "error";
+        startedAt: string;
+        completedAt?: string;
+      }>();
+      let finalHermesProfileName = "";
+      let finalHermesSessionId = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = textDecoder.decode(value, { stream: true });
+        const events = parser.push(chunk);
+
+        for (const event of events) {
+          if (event.event === "delta") {
+            const deltaData = event.data as BridgeDeltaEvent | null;
+            const deltaText = deltaData?.text ?? "";
+            if (deltaText) assistantText += deltaText;
+          } else if (event.event === "tool_start") {
+            const toolData = event.data as BridgeToolStartEvent | null;
+            if (toolData) {
+              toolCalls.set(toolData.id, {
+                id: toolData.id,
+                name: toolData.name,
+                arguments: toolData.arguments,
+                status: "pending",
+                startedAt: toolData.timestamp
+              });
+            }
+          } else if (event.event === "tool_complete") {
+            const toolData = event.data as BridgeToolCompleteEvent | null;
+            if (toolData) {
+              const existing = toolCalls.get(toolData.id);
+              if (existing) {
+                existing.result = toolData.result;
+                existing.status = "complete";
+                existing.completedAt = toolData.timestamp;
+              }
+            }
+          } else if (event.event === "tool_error") {
+            const toolData = event.data as BridgeToolErrorEvent | null;
+            if (toolData) {
+              const existing = toolCalls.get(toolData.id);
+              if (existing) {
+                existing.error = toolData.error;
+                existing.status = "error";
+                existing.completedAt = toolData.timestamp;
+              }
+            }
+          } else if (event.event === "done") {
+            const doneData = event.data as BridgeDoneEvent | null;
+            if (doneData) {
+              finalHermesProfileName = doneData.hermes_profile_name?.trim() || "";
+              finalHermesSessionId = doneData.hermes_session_id?.trim() || "";
+            }
+          } else if (event.event === "error") {
+            const errorData = event.data as BridgeErrorEvent | null;
+            throw new HermesClientError(errorData?.error || "Hermes bridge stream failed.", 502);
+          }
+        }
+      }
+
+      if (!finalHermesProfileName || !finalHermesSessionId) {
+        throw new HermesClientError("Hermes stream incomplete.", 502);
+      }
+
+      setUserHermesProfileName(user.id, finalHermesProfileName);
+      setChatHermesSessionId(user.id, parsedRequest.chatId, finalHermesSessionId);
+
+      const toolCallsArray = Array.from(toolCalls.values()).map(tc => ({
+        id: tc.id,
+        name: tc.name,
+        arguments: tc.arguments,
+        result: tc.result,
+        error: tc.error,
+        status: tc.status,
+        startedAt: tc.startedAt,
+        completedAt: tc.completedAt
+      }));
+
+      const message = appendMessage(user.id, parsedRequest.chatId, {
+        role: "assistant",
+        content: assistantText.trim()
+      }, {
+        toolCalls: toolCallsArray.length > 0 ? toolCallsArray : undefined
+      });
+
       const chat = getChat(user.id, parsedRequest.chatId);
-
       if (!chat) {
         throw new ChatStoreError("Chat not found.", 404);
       }
