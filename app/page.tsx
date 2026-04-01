@@ -16,7 +16,8 @@ import type {
   ChatAttachment,
   ChatDetail,
   ChatSummary,
-  PersistedChatMessage
+  PersistedChatMessage,
+  ToolCall
 } from "@/lib/chat-types";
 import { renderChatMarkdown } from "@/lib/chat-markdown";
 import { createSseParser, type ParsedSseEvent } from "@/lib/sse";
@@ -67,6 +68,26 @@ type StreamDeltaEvent = {
   text?: string;
 };
 
+type StreamToolStartEvent = {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+  timestamp: string;
+};
+
+type StreamToolCompleteEvent = {
+  id: string;
+  result: unknown;
+  timestamp: string;
+  duration_ms: number;
+};
+
+type StreamToolErrorEvent = {
+  id: string;
+  error: string;
+  timestamp: string;
+};
+
 type StreamDoneEvent = SendMessageResponse;
 
 type StreamErrorEvent = {
@@ -103,6 +124,117 @@ function buildAttachmentOnlyLabel(attachments: Array<{ filename: string }>) {
 
 async function readJson<T>(response: Response): Promise<T | null> {
   return (await response.json().catch(() => null)) as T | null;
+}
+
+// Tool call UI components
+function ToolCallList({ toolCalls }: { toolCalls: ToolCall[] }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const pendingCount = toolCalls.filter(tc => tc.status === "pending").length;
+  const hasAnyPending = pendingCount > 0;
+
+  return (
+    <div className="tool-call-list">
+      <button
+        type="button"
+        className="tool-call-list-header"
+        onClick={() => setIsExpanded(!isExpanded)}
+      >
+        <span className="tool-call-list-icon">
+          {hasAnyPending ? (
+            <span className="tool-call-spinner" />
+          ) : (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+              <polyline points="22 4 12 14.01 9 11.01"/>
+            </svg>
+          )}
+        </span>
+        <span className="tool-call-list-text">
+          {hasAnyPending
+            ? `Using ${toolCalls.length} tool${toolCalls.length > 1 ? 's' : ''}...`
+            : `Used ${toolCalls.length} tool${toolCalls.length > 1 ? 's' : ''}`}
+        </span>
+        <span className={`tool-call-list-chevron ${isExpanded ? 'expanded' : ''}`}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </span>
+      </button>
+      {isExpanded && (
+        <div className="tool-call-cards">
+          {toolCalls.map((toolCall) => (
+            <ToolCallCard key={toolCall.id} toolCall={toolCall} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
+  const [showArgs, setShowArgs] = useState(false);
+  const [showResult, setShowResult] = useState(false);
+  const isPending = toolCall.status === "pending";
+  const isError = toolCall.status === "error";
+  const duration = toolCall.completedAt && toolCall.startedAt
+    ? new Date(toolCall.completedAt).getTime() - new Date(toolCall.startedAt).getTime()
+    : null;
+
+  return (
+    <div className={`tool-call-card ${isPending ? 'pending' : ''} ${isError ? 'error' : ''}`}>
+      <div className="tool-call-card-header">
+        <span className="tool-call-card-status">
+          {isPending ? (
+            <span className="tool-call-spinner-small" />
+          ) : isError ? (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="15" y1="9" x2="9" y2="15"/>
+              <line x1="9" y1="9" x2="15" y2="15"/>
+            </svg>
+          ) : (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+          )}
+        </span>
+        <span className="tool-call-card-name">{toolCall.name}</span>
+        {duration !== null && (
+          <span className="tool-call-card-duration">{duration}ms</span>
+        )}
+      </div>
+      <div className="tool-call-card-body">
+        <button
+          type="button"
+          className="tool-call-toggle"
+          onClick={() => setShowArgs(!showArgs)}
+        >
+          Arguments {showArgs ? '▾' : '▸'}
+        </button>
+        {showArgs && (
+          <pre className="tool-call-code">{JSON.stringify(toolCall.arguments, null, 2)}</pre>
+        )}
+        {!isPending && (
+          <>
+            <button
+              type="button"
+              className="tool-call-toggle"
+              onClick={() => setShowResult(!showResult)}
+            >
+              {isError ? 'Error' : 'Result'} {showResult ? '▾' : '▸'}
+            </button>
+            {showResult && (
+              <pre className="tool-call-code">
+                {isError
+                  ? toolCall.error
+                  : JSON.stringify(toolCall.result, null, 2)}
+              </pre>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function normalizeText(value: string) {
@@ -815,6 +947,25 @@ export default function Home() {
       const decoder = new TextDecoder();
       const parser = createSseParser();
       let finished = false;
+      const streamingToolCalls = new Map<string, ToolCall>();
+
+      const updateMessageWithToolCalls = (content: string, toolCalls?: Map<string, ToolCall>) => {
+        setMessages((currentMessages) =>
+          currentMessages.map((message) => {
+            if (message.id !== optimisticAssistantMessage.id) {
+              return message;
+            }
+            const toolCallsArray = toolCalls
+              ? Array.from(toolCalls.values())
+              : message.toolCalls;
+            return {
+              ...message,
+              content,
+              toolCalls: toolCallsArray
+            };
+          })
+        );
+      };
 
       while (true) {
         const { done, value } = await reader.read();
@@ -830,14 +981,50 @@ export default function Home() {
           if (streamEvent.event === "delta") {
             const deltaEvent = streamEvent as ParsedSseEvent<StreamDeltaEvent>;
             const snapshot = deltaEvent.data?.snapshot ?? "";
+            updateMessageWithToolCalls(snapshot, streamingToolCalls);
+            continue;
+          }
 
-            setMessages((currentMessages) =>
-              currentMessages.map((message) =>
-                message.id === optimisticAssistantMessage.id
-                  ? { ...message, content: snapshot }
-                  : message
-              )
+          if (streamEvent.event === "tool_start") {
+            const toolData = streamEvent as ParsedSseEvent<StreamToolStartEvent>;
+            const toolCall: ToolCall = {
+              id: toolData.data?.id ?? crypto.randomUUID(),
+              name: toolData.data?.name ?? "Unknown",
+              arguments: toolData.data?.arguments ?? {},
+              status: "pending",
+              startedAt: toolData.data?.timestamp ?? new Date().toISOString()
+            };
+            streamingToolCalls.set(toolCall.id, toolCall);
+            updateMessageWithToolCalls(
+              streamingToolCalls.size === 1 && optimisticAssistantMessage.content === "Thinking..."
+                ? ""
+                : optimisticAssistantMessage.content,
+              streamingToolCalls
             );
+            continue;
+          }
+
+          if (streamEvent.event === "tool_complete") {
+            const toolData = streamEvent as ParsedSseEvent<StreamToolCompleteEvent>;
+            const existing = streamingToolCalls.get(toolData.data?.id ?? "");
+            if (existing && toolData.data) {
+              existing.result = toolData.data.result;
+              existing.status = "complete";
+              existing.completedAt = toolData.data.timestamp;
+            }
+            updateMessageWithToolCalls(optimisticAssistantMessage.content, streamingToolCalls);
+            continue;
+          }
+
+          if (streamEvent.event === "tool_error") {
+            const toolData = streamEvent as ParsedSseEvent<StreamToolErrorEvent>;
+            const existing = streamingToolCalls.get(toolData.data?.id ?? "");
+            if (existing && toolData.data) {
+              existing.error = toolData.data.error;
+              existing.status = "error";
+              existing.completedAt = toolData.data.timestamp;
+            }
+            updateMessageWithToolCalls(optimisticAssistantMessage.content, streamingToolCalls);
             continue;
           }
 
@@ -1200,6 +1387,9 @@ export default function Home() {
                     {message.role === 'assistant' ? 'Hermes' : 'You'}
                   </span>
                 </div>
+                {message.toolCalls && message.toolCalls.length > 0 && (
+                  <ToolCallList toolCalls={message.toolCalls} />
+                )}
                 <div className="message-content">
                   {renderChatMarkdown(
                     message.content || (message.role === 'assistant' && isSending ? 'Thinking...' : '')

@@ -18,10 +18,22 @@ export type ChatMessage = {
   content: string;
 };
 
+export type ToolCall = {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+  result?: unknown;
+  error?: string;
+  status: "pending" | "complete" | "error";
+  startedAt: string;
+  completedAt?: string;
+};
+
 export type PersistedChatMessage = ChatMessage & {
   attachments: ChatAttachment[];
   createdAt: string;
   id: string;
+  toolCalls?: ToolCall[];
 };
 
 export type ChatSummary = {

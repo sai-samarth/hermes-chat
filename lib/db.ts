@@ -124,6 +124,13 @@ function initializeDatabase(db: DatabaseInstance) {
     `);
   }
 
+  if (!columnExists(db, "messages", "tool_calls")) {
+    db.exec(`
+      alter table messages
+      add column tool_calls text
+    `);
+  }
+
   db.exec(`
     create index if not exists idx_sessions_user_expires_at
       on sessions (user_id, expires_at);

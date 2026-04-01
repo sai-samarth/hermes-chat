@@ -32,10 +32,39 @@ type BridgeDeltaEvent = {
   text?: string;
 };
 
+type BridgeToolStartEvent = {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+  timestamp: string;
+};
+
+type BridgeToolCompleteEvent = {
+  id: string;
+  result: unknown;
+  timestamp: string;
+  duration_ms: number;
+};
+
+type BridgeToolErrorEvent = {
+  id: string;
+  error: string;
+  timestamp: string;
+};
+
 type BridgeDoneEvent = {
   hermes_profile_name?: string;
   hermes_session_id?: string;
   message?: string;
+  tool_calls?: Array<{
+    id: string;
+    name: string;
+    arguments: Record<string, unknown>;
+    result?: unknown;
+    error?: string;
+    started_at: string;
+    completed_at?: string;
+  }>;
 };
 
 type BridgeErrorEvent = {
@@ -274,6 +303,16 @@ export async function POST(request: Request) {
         const parser = createSseParser();
         let assistantText = "";
         let completed = false;
+        const toolCalls = new Map<string, {
+          id: string;
+          name: string;
+          arguments: Record<string, unknown>;
+          result?: unknown;
+          error?: string;
+          status: "pending" | "complete" | "error";
+          startedAt: string;
+          completedAt?: string;
+        }>();
 
         const sendEvent = (event: string, data: unknown) => {
           controller.enqueue(textEncoder.encode(encodeSseEvent(event, data)));
@@ -309,9 +348,23 @@ export async function POST(request: Request) {
           setUserHermesProfileName(user.id, finalHermesProfileName);
           setChatHermesSessionId(user.id, parsedRequest.chatId, finalHermesSessionId);
 
+          // Convert tool calls map to array for storage
+          const toolCallsArray = Array.from(toolCalls.values()).map(tc => ({
+            id: tc.id,
+            name: tc.name,
+            arguments: tc.arguments,
+            result: tc.result,
+            error: tc.error,
+            status: tc.status,
+            startedAt: tc.startedAt,
+            completedAt: tc.completedAt
+          }));
+
           const message = appendMessage(user.id, parsedRequest.chatId, {
             role: "assistant",
             content: finalAssistantText
+          }, {
+            toolCalls: toolCallsArray.length > 0 ? toolCallsArray : undefined
           });
           const chat = getChat(user.id, parsedRequest.chatId);
 
@@ -360,6 +413,49 @@ export async function POST(request: Request) {
                   text: deltaText,
                   snapshot: assistantText
                 });
+                continue;
+              }
+
+              if (event.event === "tool_start") {
+                const toolData = event.data as BridgeToolStartEvent | null;
+                if (toolData) {
+                  toolCalls.set(toolData.id, {
+                    id: toolData.id,
+                    name: toolData.name,
+                    arguments: toolData.arguments,
+                    status: "pending",
+                    startedAt: toolData.timestamp
+                  });
+                  sendEvent("tool_start", toolData);
+                }
+                continue;
+              }
+
+              if (event.event === "tool_complete") {
+                const toolData = event.data as BridgeToolCompleteEvent | null;
+                if (toolData) {
+                  const existing = toolCalls.get(toolData.id);
+                  if (existing) {
+                    existing.result = toolData.result;
+                    existing.status = "complete";
+                    existing.completedAt = toolData.timestamp;
+                  }
+                  sendEvent("tool_complete", toolData);
+                }
+                continue;
+              }
+
+              if (event.event === "tool_error") {
+                const toolData = event.data as BridgeToolErrorEvent | null;
+                if (toolData) {
+                  const existing = toolCalls.get(toolData.id);
+                  if (existing) {
+                    existing.error = toolData.error;
+                    existing.status = "error";
+                    existing.completedAt = toolData.timestamp;
+                  }
+                  sendEvent("tool_error", toolData);
+                }
                 continue;
               }
 

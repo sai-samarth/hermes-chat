@@ -9,7 +9,8 @@ import type {
   ChatMessage,
   ChatMessageRole,
   ChatSummary,
-  PersistedChatMessage
+  PersistedChatMessage,
+  ToolCall
 } from "@/lib/chat-types";
 import { getDb } from "@/lib/db";
 
@@ -135,15 +136,20 @@ function mapAttachmentRow(row: MessageAttachmentRow): ChatAttachment {
 }
 
 function mapPersistedMessage(
-  row: MessageRow,
+  row: MessageRow & { tool_calls?: string | null },
   attachmentsByMessageId: Map<string, ChatAttachment[]>
 ): PersistedChatMessage {
+  const toolCalls = row.tool_calls
+    ? (JSON.parse(row.tool_calls) as ToolCall[])
+    : undefined;
+
   return {
     id: row.id,
     role: row.role,
     content: row.content,
     attachments: attachmentsByMessageId.get(row.id) ?? [],
-    createdAt: row.created_at
+    createdAt: row.created_at,
+    toolCalls
   };
 }
 
@@ -370,6 +376,7 @@ export function appendMessage(
   options?: {
     attachments?: StoredAttachmentInput[];
     hermesContent?: string;
+    toolCalls?: ToolCall[];
   }
 ): PersistedChatMessage {
   const db = getDb();
@@ -377,6 +384,9 @@ export function appendMessage(
   const createdAt = new Date().toISOString();
   const attachments = options?.attachments ?? [];
   const hermesContent = options?.hermesContent?.trim() || null;
+  const toolCallsJson = options?.toolCalls
+    ? JSON.stringify(options.toolCalls)
+    : null;
 
   const insertMessage = db.transaction(() => {
     const chatRow = db
@@ -400,8 +410,8 @@ export function appendMessage(
 
     db.prepare(
       `
-        insert into messages (id, chat_id, role, content, hermes_content, created_at)
-        values (?, ?, ?, ?, ?, ?)
+        insert into messages (id, chat_id, role, content, hermes_content, tool_calls, created_at)
+        values (?, ?, ?, ?, ?, ?, ?)
       `
     ).run(
       messageId,
@@ -409,6 +419,7 @@ export function appendMessage(
       message.role,
       message.content,
       hermesContent,
+      toolCallsJson,
       createdAt
     );
 
