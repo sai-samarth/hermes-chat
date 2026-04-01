@@ -337,7 +337,7 @@ export function getChat(userId: string, chatId: string): ChatDetail | null {
   const messageRows = db
     .prepare(
       `
-        select m.id, m.role, m.content, m.created_at
+        select m.id, m.role, m.content, m.created_at, m.tool_calls
         from messages m
         join chats c on c.id = m.chat_id
         where m.chat_id = ?
@@ -345,7 +345,7 @@ export function getChat(userId: string, chatId: string): ChatDetail | null {
         order by m.created_at asc, m.id asc
       `
     )
-    .all(chatId, userId) as MessageRow[];
+    .all(chatId, userId) as (MessageRow & { tool_calls?: string | null })[];
 
   const attachmentsByMessageId = getAttachmentsForMessageIds(
     userId,
